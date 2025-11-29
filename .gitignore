@@ -1,0 +1,16 @@
+# Binaries
+/kubectl-medic
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go build
+*.test
+*.out
+
+# IDE/editor stuff
+.vscode/
+.idea/
+*.swp
+*~
