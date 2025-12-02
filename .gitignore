@@ -1,16 +1,18 @@
-# Binaries
-/kubectl-medic
+# Go build artifacts
+bin/
+dist/
 *.exe
-*.dll
-*.so
-*.dylib
-
-# Go build
-*.test
 *.out
 
-# IDE/editor stuff
+# Temporary editor/project files
 .vscode/
 .idea/
-*.swp
-*~
+.DS_Store
+
+# Logs, cache
+*.log
+.cache/
+tmp/
+
+# Go module cache — optional
+gocache/
