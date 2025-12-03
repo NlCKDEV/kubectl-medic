@@ -1,18 +1,32 @@
 # Go build artifacts
 bin/
 dist/
+kubectl-medic
+medic
 *.exe
+*.dll
+*.so
+*.dylib
 *.out
+*.test
 
 # Temporary editor/project files
 .vscode/
 .idea/
 .DS_Store
-
+*.swp
+*.swo
+*~
+Thumbs.db
+/.claude
 # Logs, cache
 *.log
 .cache/
 tmp/
 
-# Go module cache — optional
+# Go module cache
 gocache/
+vendor/
+
+# Go workspace
+go.work
