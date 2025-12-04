@@ -126,8 +126,9 @@ func (m Model) View() string {
 	}
 
 	return style.
-		Width(m.width - constants.PaneBorderPadding).
-		Height(m.height - constants.PaneBorderPadding).
+		Width(m.width - constants.PaneHorizontalOverhead).
+		Height(m.height - constants.PaneVerticalOverhead).
+		Padding(0, 0).
 		Render(viewportView)
 }
 
@@ -242,7 +243,12 @@ func (m Model) renderDetails() string {
 	}
 
 	b.WriteString("\n")
-	help := util.FormatHelpLine(m.width-constants.DetailsHelpTextOffset,
+	// Help text width: use pane's content width (m.width - PaneHorizontalOverhead)
+	helpWidth := m.width - constants.PaneHorizontalOverhead
+	if helpWidth < 40 {
+		helpWidth = 40
+	}
+	help := util.FormatHelpLine(helpWidth,
 		"↑/↓ scroll",
 		"x diagnostics",
 		"l logs")
@@ -281,7 +287,7 @@ func (m Model) renderDiagnostics() string {
 	}
 
 	// Calculate usable width for wrapping (account for borders and padding)
-	contentWidth := m.width - 8
+	contentWidth := m.width - constants.PaneHorizontalOverhead
 	if contentWidth < 40 {
 		contentWidth = 40
 	}
@@ -336,7 +342,12 @@ func (m Model) renderDiagnostics() string {
 	}
 
 	b.WriteString("\n")
-	help := util.FormatHelpLine(m.width-8,
+	// Help text width: use pane's content width
+	helpWidth := m.width - constants.PaneHorizontalOverhead
+	if helpWidth < 40 {
+		helpWidth = 40
+	}
+	help := util.FormatHelpLine(helpWidth,
 		"↑/↓ scroll",
 		"c copy mode",
 		"d details",
@@ -406,7 +417,12 @@ func (m Model) renderCopyCommands() string {
 	}
 
 	b.WriteString("\n")
-	help := util.FormatHelpLine(m.width-8,
+	// Help text width: use pane's content width
+	helpWidth := m.width - constants.PaneHorizontalOverhead
+	if helpWidth < 40 {
+		helpWidth = 40
+	}
+	help := util.FormatHelpLine(helpWidth,
 		"↑/↓ scroll",
 		"x back",
 		"Triple-click to copy")
@@ -537,14 +553,6 @@ func wrapCommand(cmd string, width int, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
-// min returns the smaller of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // renderLogs shows container logs
 func (m Model) renderLogs() string {
 	var b strings.Builder
@@ -597,7 +605,12 @@ func (m Model) renderLogs() string {
 	}
 
 	b.WriteString("\n")
-	help := util.FormatHelpLine(m.width-8,
+	// Help text width: use pane's content width
+	helpWidth := m.width - constants.PaneHorizontalOverhead
+	if helpWidth < 40 {
+		helpWidth = 40
+	}
+	help := util.FormatHelpLine(helpWidth,
 		"↑/↓ scroll",
 		"c container",
 		"d details",
@@ -695,7 +708,12 @@ func (m Model) renderNamespaceHealth() string {
 	}
 
 	b.WriteString("\n")
-	help := util.FormatHelpLine(m.width-8,
+	// Help text width: use pane's content width
+	helpWidth := m.width - constants.PaneHorizontalOverhead
+	if helpWidth < 40 {
+		helpWidth = 40
+	}
+	help := util.FormatHelpLine(helpWidth,
 		"d details",
 		"Esc back")
 	b.WriteString(theme.HelpStyle.Render(help))
@@ -714,10 +732,10 @@ func (m *Model) SetSize(width, height int) {
 	m.height = height
 
 	// Calculate viewport dimensions (subtract borders, padding, and title/help space)
-	// Border + padding = 4 each side
-	// Title and help = ~6 lines
-	viewportWidth := width - 8
-	viewportHeight := height - 10
+	// Pane has: border(2) + padding(1,2) = 6 overhead (PaneHorizontalOverhead)
+	// Title, separator, help = ~6 lines overhead
+	viewportWidth := width - constants.PaneHorizontalOverhead
+	viewportHeight := height - constants.PaneVerticalOverhead - 6
 
 	// Ensure minimum dimensions
 	if viewportWidth < 20 {
@@ -733,19 +751,21 @@ func (m *Model) SetSize(width, height int) {
 }
 
 // formatHealthRow formats a health summary row with consistent alignment
+// No leading spaces - let viewport/pane handle visual indentation
 func formatHealthRow(label string, value int, style lipgloss.Style) string {
 	// Fixed width for labels (24 chars) to ensure alignment
 	labelWidth := 24
 	paddedLabel := util.PadRight(label+":", labelWidth)
 	valueStr := fmt.Sprintf("%d", value)
 	styledValue := style.Render(valueStr)
-	return fmt.Sprintf("  %s %s\n", paddedLabel, styledValue)
+	return fmt.Sprintf("%s %s\n", paddedLabel, styledValue)
 }
 
 // formatIssueRow formats an issue row with icon, label, and count
+// No leading spaces - let viewport/pane handle visual indentation
 func formatIssueRow(label string, count int, icon string, style lipgloss.Style) string {
 	// Fixed width for labels (26 chars) to ensure alignment
 	labelWidth := 26
 	paddedLabel := util.PadRight(label+":", labelWidth)
-	return fmt.Sprintf("  %s %s %d pod(s)\n", style.Render(icon), paddedLabel, count)
+	return fmt.Sprintf("%s %s %d pod(s)\n", style.Render(icon), paddedLabel, count)
 }

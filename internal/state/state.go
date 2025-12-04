@@ -87,7 +87,6 @@ type AppState struct {
 	LogsError            string
 	CurrentNamespaceHealth *types.NamespaceHealth
 	NamespaceHealthError   string
-	LastDiagnostic         *DiagnosticResult
 }
 
 // ViewMode represents which detail view is currently active

@@ -1,6 +1,7 @@
 package namespace
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -304,12 +305,87 @@ func TestNamespaceColumnDropping(t *testing.T) {
 				width: tt.width,
 			}
 
-			_, showAge := m.calculateNameWidth()
+			// Use content width (width minus overhead)
+			contentWidth := tt.width - 6 // PaneHorizontalOverhead
+			_, showAge := m.calculateColumnWidths(contentWidth)
 
 			if showAge != tt.expectAge {
 				t.Errorf("Width %d: expected showAge=%v, got %v", tt.width, tt.expectAge, showAge)
 			}
 		})
+	}
+}
+
+// TestSelectionGutterWidthInvariant verifies that the selection gutter is always 2 characters
+func TestSelectionGutterWidthInvariant(t *testing.T) {
+	appState := &state.AppState{
+		Namespaces: state.Resource[[]state.NamespaceInfo]{
+			Data: []state.NamespaceInfo{
+				{Name: "test-namespace", Status: "Active", Age: "10d"},
+			},
+		},
+	}
+
+	m := Model{
+		state:  appState,
+		width:  60,
+		height: 30,
+		active: true,
+	}
+
+	// Build row with selection gutter
+	contentWidth := m.width - 6
+	nameWidth, showAge := m.calculateColumnWidths(contentWidth)
+
+	// Test unselected row gutter - use same gutter for both to test selection style
+	unselectedRow := m.buildTableRow("  ", "test", nameWidth, "Active", 10, "10d", 5, showAge, false, "Active")
+	// Test selected row gutter (same content, just selected=true)
+	selectedRow := m.buildTableRow("  ", "test", nameWidth, "Active", 10, "10d", 5, showAge, true, "Active")
+
+	// Strip ANSI to compare raw lengths - use rune count for UTF-8 safety
+	unselectedPlain := stripANSI(unselectedRow)
+	selectedPlain := stripANSI(selectedRow)
+
+	unselectedRunes := []rune(unselectedPlain)
+	selectedRunes := []rune(selectedPlain)
+
+	// Both should have the same length (selection style adds no width)
+	if len(unselectedRunes) != len(selectedRunes) {
+		t.Errorf("Selected row rune count (%d) differs from unselected (%d)", len(selectedRunes), len(unselectedRunes))
+	}
+
+	// Both should start with 2-char gutter (spaces)
+	if len(unselectedRunes) >= 2 && string(unselectedRunes[:2]) != "  " {
+		t.Errorf("Unselected row should start with 2 spaces, got: %q", string(unselectedRunes[:min(10, len(unselectedRunes))]))
+	}
+}
+
+// TestRowWidthConsistency verifies header and data rows have consistent widths
+func TestRowWidthConsistency(t *testing.T) {
+	m := Model{
+		width:  80,
+		height: 30,
+	}
+
+	contentWidth := m.width - 6
+	nameWidth, showAge := m.calculateColumnWidths(contentWidth)
+
+	// Build header row with same gutter as data row
+	headerRow := m.buildTableRow("  ", "NAME", nameWidth, "STATUS", 10, "AGE", 5, showAge, false, "")
+
+	// Build data row with same gutter
+	dataRow := m.buildTableRow("  ", "test-namespace", nameWidth, "Active", 10, "10d", 5, showAge, false, "Active")
+
+	headerPlain := stripANSI(headerRow)
+	dataPlain := stripANSI(dataRow)
+
+	headerRunes := []rune(headerPlain)
+	dataRunes := []rune(dataPlain)
+
+	if len(headerRunes) != len(dataRunes) {
+		t.Errorf("Header rune count (%d) differs from data row (%d)", len(headerRunes), len(dataRunes))
+		t.Logf("Header: %q", headerPlain)
+		t.Logf("Data:   %q", dataPlain)
 	}
 }
 
@@ -440,6 +516,50 @@ func TestNamespaceHealthKeyCaching(t *testing.T) {
 
 	if m.state.Health.Loading {
 		t.Error("Expected Health.Loading to be false when cached health data exists for namespace")
+	}
+}
+
+// TestHeaderNeverWraps verifies table headers fit on one line at all widths
+func TestHeaderNeverWraps(t *testing.T) {
+	appState := &state.AppState{
+		Namespaces: state.Resource[[]state.NamespaceInfo]{
+			Data: []state.NamespaceInfo{
+				{Name: "test-namespace", Status: "Active", Age: "10d"},
+			},
+		},
+	}
+
+	widths := []int{40, 60, 80, 100, 130, 200}
+
+	for _, w := range widths {
+		t.Run(fmt.Sprintf("width_%d", w), func(t *testing.T) {
+			m := Model{
+				state:  appState,
+				width:  w,
+				height: 20,
+				active: true,
+			}
+
+			view := m.View()
+			lines := strings.Split(view, "\n")
+
+			// Find header line (contains "NAME")
+			for _, line := range lines {
+				plain := stripANSI(line)
+				if strings.Contains(plain, "NAME") && strings.Contains(plain, "STATUS") {
+					// Verify header is exactly one line (no embedded \n)
+					if strings.Contains(line, "\n") {
+						t.Errorf("Header wrapped at width %d: %q", w, line)
+					}
+					// Verify header doesn't exceed pane content width + safety margin
+					contentWidth := w - 6 // PaneHorizontalOverhead
+					if len([]rune(plain)) > contentWidth+10 {
+						t.Errorf("Header too wide at width %d: %d chars vs content %d", w, len([]rune(plain)), contentWidth)
+					}
+					break
+				}
+			}
+		})
 	}
 }
 

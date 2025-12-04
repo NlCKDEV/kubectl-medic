@@ -66,13 +66,18 @@ var (
 			Foreground(ColorInfo)
 
 	// List item styles
-	ListItemStyle = lipgloss.NewStyle().
-			Padding(0, 2)
+	// NOTE: No padding on list items - padding is handled by pane container.
+	// Adding padding here would cause width mismatches and row shifting.
+	ListItemStyle = lipgloss.NewStyle()
 
+	// ListItemSelectedStyle applies ONLY color and bold - NO padding.
+	// Padding would add characters to selected rows, causing:
+	// 1. Selected rows to be wider than unselected rows
+	// 2. Content to shift horizontally when selection changes
+	// 3. Rows to wrap if total width exceeds container
 	ListItemSelectedStyle = lipgloss.NewStyle().
 				Foreground(ColorSelected).
-				Bold(true).
-				Padding(0, 2)
+				Bold(true)
 
 	// Help text style
 	HelpStyle = lipgloss.NewStyle().
@@ -96,6 +101,23 @@ var (
 	// Separator style for visual grouping
 	SeparatorStyle = lipgloss.NewStyle().
 			Foreground(ColorSeparator)
+
+	// Table row styles - MUST NOT have padding to avoid width changes.
+	// These are used for pre-sized table content where padding would cause wrapping.
+
+	// TableRowStyle is for unselected table rows - no styling (plain text)
+	TableRowStyle = lipgloss.NewStyle()
+
+	// TableRowSelectedStyle is for selected table rows - color and bold ONLY.
+	// NO padding, margin, or any property that changes visual width.
+	TableRowSelectedStyle = lipgloss.NewStyle().
+				Foreground(ColorSelected).
+				Bold(true)
+
+	// TableHeaderStyle is for table column headers - subtle color, no italic/padding.
+	// Italic can cause rendering issues on narrow terminals.
+	TableHeaderStyle = lipgloss.NewStyle().
+				Foreground(ColorSubtle)
 
 	// Active status bar item style
 	StatusBarActiveStyle = lipgloss.NewStyle().
