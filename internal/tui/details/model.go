@@ -161,37 +161,41 @@ func (m Model) renderDetails() string {
 	}
 
 	// Pod metadata section
+	b.WriteString("  ") // Section indent
 	b.WriteString(theme.SectionHeaderStyle.Render("Pod") + "\n")
-	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 36)) + "\n")
-	b.WriteString(fmt.Sprintf("  Name:       %s\n", pod.Name))
-	b.WriteString(fmt.Sprintf("  Namespace:  %s\n", pod.Namespace))
-	b.WriteString(fmt.Sprintf("  Status:     %s\n", theme.StatusStyle(string(pod.Status.Phase)).Render(string(pod.Status.Phase))))
-	b.WriteString(fmt.Sprintf("  Node:       %s\n", pod.Spec.NodeName))
-	b.WriteString(fmt.Sprintf("  IP:         %s\n", pod.Status.PodIP))
+	b.WriteString("  ") // Separator indent
+	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 32)) + "\n")
+	b.WriteString(fmt.Sprintf("    Name:       %s\n", pod.Name))
+	b.WriteString(fmt.Sprintf("    Namespace:  %s\n", pod.Namespace))
+	b.WriteString(fmt.Sprintf("    Status:     %s\n", theme.StatusStyle(string(pod.Status.Phase)).Render(string(pod.Status.Phase))))
+	b.WriteString(fmt.Sprintf("    Node:       %s\n", pod.Spec.NodeName))
+	b.WriteString(fmt.Sprintf("    IP:         %s\n", pod.Status.PodIP))
 
 	// Containers section
 	b.WriteString("\n")
+	b.WriteString("  ") // Section indent
 	b.WriteString(theme.SectionHeaderStyle.Render("Containers") + "\n")
-	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 36)) + "\n")
+	b.WriteString("  ") // Separator indent
+	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 32)) + "\n")
 	for _, container := range pod.Spec.Containers {
-		b.WriteString(fmt.Sprintf("  Container:  %s\n", theme.KeyStyle.Render(container.Name)))
-		b.WriteString(fmt.Sprintf("  Image:      %s\n", container.Image))
+		b.WriteString(fmt.Sprintf("    Name:      %s\n", theme.KeyStyle.Render(container.Name)))
+		b.WriteString(fmt.Sprintf("    Image:     %s\n", container.Image))
 
 		// Find container status
 		for _, status := range pod.Status.ContainerStatuses {
 			if status.Name == container.Name {
-				b.WriteString(fmt.Sprintf("  Ready:       %v\n", status.Ready))
-				b.WriteString(fmt.Sprintf("  Restarts:    %d\n", status.RestartCount))
+				b.WriteString(fmt.Sprintf("    Ready:     %v\n", status.Ready))
+				b.WriteString(fmt.Sprintf("    Restarts:  %d\n", status.RestartCount))
 
 				// Container state
 				if status.State.Running != nil {
-					b.WriteString(fmt.Sprintf("  State:       %s\n", theme.StatusOKStyle.Render("Running")))
+					b.WriteString(fmt.Sprintf("    State:     %s\n", theme.StatusOKStyle.Render("Running")))
 				} else if status.State.Waiting != nil {
-					b.WriteString(fmt.Sprintf("  State:       %s (%s)\n",
+					b.WriteString(fmt.Sprintf("    State:     %s (%s)\n",
 						theme.StatusWarnStyle.Render("Waiting"),
 						status.State.Waiting.Reason))
 				} else if status.State.Terminated != nil {
-					b.WriteString(fmt.Sprintf("  State:       %s (exit %d)\n",
+					b.WriteString(fmt.Sprintf("    State:     %s (exit %d)\n",
 						theme.StatusErrorStyle.Render("Terminated"),
 						status.State.Terminated.ExitCode))
 				}
@@ -202,8 +206,10 @@ func (m Model) renderDetails() string {
 
 	// Conditions section
 	b.WriteString("\n")
+	b.WriteString("  ") // Section indent
 	b.WriteString(theme.SectionHeaderStyle.Render("Conditions") + "\n")
-	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 36)) + "\n")
+	b.WriteString("  ") // Separator indent
+	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 32)) + "\n")
 	for _, condition := range pod.Status.Conditions {
 		statusIcon := "✓"
 		statusStyle := theme.StatusOKStyle
@@ -212,7 +218,7 @@ func (m Model) renderDetails() string {
 			statusStyle = theme.StatusErrorStyle
 		}
 
-		b.WriteString(fmt.Sprintf("  %s %s: %s\n",
+		b.WriteString(fmt.Sprintf("    %s %s: %s\n",
 			statusStyle.Render(statusIcon),
 			condition.Type,
 			condition.Status))
@@ -220,10 +226,12 @@ func (m Model) renderDetails() string {
 
 	// Events section
 	b.WriteString("\n")
+	b.WriteString("  ") // Section indent
 	b.WriteString(theme.SectionHeaderStyle.Render("Recent Events") + "\n")
-	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 36)) + "\n")
+	b.WriteString("  ") // Separator indent
+	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 32)) + "\n")
 	if len(m.state.CurrentEvents) == 0 {
-		b.WriteString("  No events\n")
+		b.WriteString("    No events\n")
 	} else {
 		for i, event := range m.state.CurrentEvents {
 			if i >= constants.DetailsMaxRecentEvents {
@@ -235,11 +243,11 @@ func (m Model) renderDetails() string {
 				eventStyle = theme.StatusWarnStyle
 			}
 
-			b.WriteString(fmt.Sprintf("  %s %s: %s\n",
+			b.WriteString(fmt.Sprintf("    %s %s: %s\n",
 				eventStyle.Render(event.Type),
 				event.Reason,
 				event.Message))
-			b.WriteString(fmt.Sprintf("    Last seen: %s (x%d)\n", event.LastSeen, event.Count))
+			b.WriteString(fmt.Sprintf("      Last seen: %s (x%d)\n", event.LastSeen, event.Count))
 		}
 	}
 
@@ -279,13 +287,19 @@ func (m Model) renderDiagnostics() string {
 		return b.String()
 	}
 
-	b.WriteString(fmt.Sprintf("Pod: %s\n\n", theme.KeyStyle.Render(m.state.CurrentPod.Name)))
+	b.WriteString(fmt.Sprintf("  Pod: %s\n\n", theme.KeyStyle.Render(m.state.CurrentPod.Name)))
 
 	// Check if diagnostics are available
 	if len(m.state.Diagnostics) == 0 {
 		b.WriteString(theme.LoadingStyle.Render("Running diagnostics...\n"))
 		return b.String()
 	}
+
+	// Diagnostics section header
+	b.WriteString("  ") // Section indent
+	b.WriteString(theme.SectionHeaderStyle.Render("Analysis Results") + "\n")
+	b.WriteString("  ") // Separator indent
+	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 32)) + "\n\n")
 
 	// Calculate usable width for wrapping (account for borders and padding)
 	contentWidth := m.width - constants.PaneHorizontalOverhead
@@ -298,10 +312,10 @@ func (m Model) renderDiagnostics() string {
 
 		// Add separator between diagnostics
 		if i > 0 {
-			b.WriteString("\n" + theme.SeparatorStyle.Render(strings.Repeat("─", min(contentWidth, 60))) + "\n\n")
+			b.WriteString("\n" + "  " + theme.SeparatorStyle.Render(strings.Repeat("─", min(contentWidth-2, 34))) + "\n\n")
 		}
 
-		// Render severity badge and title
+		// Render severity badge and title (section header style)
 		severityStyle := theme.StatusInfoStyle
 		severityText := "[INFO]"
 		switch diag.Severity {
@@ -316,26 +330,29 @@ func (m Model) renderDiagnostics() string {
 			severityText = "[INFO]"
 		}
 
-		b.WriteString(severityStyle.Render(severityText) + " " + diag.Title + "\n\n")
+		b.WriteString("    " + severityStyle.Render(severityText) + " " + theme.KeyStyle.Render(diag.Title) + "\n\n")
 
-		// Description - wrap to content width
-		b.WriteString(wrapText(diag.Description, contentWidth) + "\n")
+		// Description - wrap to content width with indentation
+		descLines := strings.Split(wrapText(diag.Description, contentWidth-6), "\n")
+		for _, line := range descLines {
+			b.WriteString("      " + line + "\n")
+		}
 
 		// Suggested commands - format for easy copying with natural wrapping
 		if len(diag.SuggestedCommands) > 0 {
-			b.WriteString("\n" + theme.HelpStyle.Render("Suggested commands:") + "\n")
+			b.WriteString("\n      " + theme.HelpStyle.Render("Suggested commands:") + "\n")
 			for _, cmd := range diag.SuggestedCommands {
 				// Check if it's a comment (starts with #)
 				if strings.HasPrefix(cmd, "#") {
 					// Render comment in subdued color, still selectable
 					// Allow wrapping for long comments
-					wrapped := wrapCommand(cmd, contentWidth, "  ")
+					wrapped := wrapCommand(cmd, contentWidth-8, "        ")
 					b.WriteString(theme.HelpStyle.Render(wrapped) + "\n")
 				} else {
 					// Render command with simple prefix for visual clarity
 					// Allow natural wrapping if command is too long
 					// Use plain text for easy selection - no styling inside the command
-					wrapped := wrapCommand(cmd, contentWidth, "  $ ")
+					wrapped := wrapCommand(cmd, contentWidth-8, "        $ ")
 					b.WriteString(wrapped + "\n")
 				}
 			}
