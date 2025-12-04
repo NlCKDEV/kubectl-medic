@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	corev1 "k8s.io/api/core/v1"
 
@@ -126,8 +126,8 @@ func (m Model) View() string {
 	}
 
 	return style.
-		Width(m.width - constants.PaneHorizontalOverhead).
-		Height(m.height - constants.PaneVerticalOverhead).
+		Width(m.width-constants.PaneHorizontalOverhead).
+		Height(m.height-constants.PaneVerticalOverhead).
 		Padding(0, 0).
 		Render(viewportView)
 }
@@ -161,8 +161,8 @@ func (m Model) renderDetails() string {
 	}
 
 	// Pod metadata section
-	b.WriteString(theme.StatusInfoStyle.Render("Pod") + "\n")
-	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 40)) + "\n")
+	b.WriteString(theme.SectionHeaderStyle.Render("Pod") + "\n")
+	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 36)) + "\n")
 	b.WriteString(fmt.Sprintf("  Name:       %s\n", pod.Name))
 	b.WriteString(fmt.Sprintf("  Namespace:  %s\n", pod.Namespace))
 	b.WriteString(fmt.Sprintf("  Status:     %s\n", theme.StatusStyle(string(pod.Status.Phase)).Render(string(pod.Status.Phase))))
@@ -171,8 +171,8 @@ func (m Model) renderDetails() string {
 
 	// Containers section
 	b.WriteString("\n")
-	b.WriteString(theme.StatusInfoStyle.Render("Containers") + "\n")
-	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 40)) + "\n")
+	b.WriteString(theme.SectionHeaderStyle.Render("Containers") + "\n")
+	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 36)) + "\n")
 	for _, container := range pod.Spec.Containers {
 		b.WriteString(fmt.Sprintf("  • %s\n", theme.KeyStyle.Render(container.Name)))
 		b.WriteString(fmt.Sprintf("    Image: %s\n", container.Image))
@@ -201,8 +201,8 @@ func (m Model) renderDetails() string {
 
 	// Conditions section
 	b.WriteString("\n")
-	b.WriteString(theme.StatusInfoStyle.Render("Conditions") + "\n")
-	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 40)) + "\n")
+	b.WriteString(theme.SectionHeaderStyle.Render("Conditions") + "\n")
+	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 36)) + "\n")
 	for _, condition := range pod.Status.Conditions {
 		statusIcon := "✓"
 		statusStyle := theme.StatusOKStyle
@@ -219,8 +219,8 @@ func (m Model) renderDetails() string {
 
 	// Events section
 	b.WriteString("\n")
-	b.WriteString(theme.StatusInfoStyle.Render("Recent Events") + "\n")
-	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 40)) + "\n")
+	b.WriteString(theme.SectionHeaderStyle.Render("Recent Events") + "\n")
+	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 36)) + "\n")
 	if len(m.state.CurrentEvents) == 0 {
 		b.WriteString("  No events\n")
 	} else {

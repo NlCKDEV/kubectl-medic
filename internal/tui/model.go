@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	corev1 "k8s.io/api/core/v1"
@@ -34,9 +35,9 @@ const debugMode = false
 type LayoutMode int
 
 const (
-	LayoutThreePane LayoutMode = iota // Wide terminals: all 3 panes
-	LayoutTwoPane                     // Medium terminals: 2 relevant panes
-	LayoutSinglePane                  // Small terminals: 1 active pane
+	LayoutThreePane  LayoutMode = iota // Wide terminals: all 3 panes
+	LayoutTwoPane                      // Medium terminals: 2 relevant panes
+	LayoutSinglePane                   // Small terminals: 1 active pane
 )
 
 // Message types for async Kubernetes operations
@@ -79,28 +80,34 @@ type NamespaceHealthLoadedMsg struct {
 
 // Model is the main application model containing all three panes
 type Model struct {
-	state       *state.AppState
-	activePane  ActivePane
-	layoutMode  LayoutMode
-	namespaces  namespace.Model
-	pods        pods.Model
-	details     details.Model
-	width       int
-	height      int
-	showHelp    bool
+	state        *state.AppState
+	activePane   ActivePane
+	layoutMode   LayoutMode
+	namespaces   namespace.Model
+	pods         pods.Model
+	details      details.Model
+	width        int
+	height       int
+	showHelp     bool
+	helpViewport *viewport.Model // Scrollable viewport for help screen
 }
 
 // NewModel creates a new TUI application model with Kubernetes client
 func NewModel(kubeClient state.KubeClient) Model {
 	appState := state.NewAppState(kubeClient)
 
+	// Initialize help viewport
+	helpVp := viewport.New(80, 30)
+	helpVp.HighPerformanceRendering = false
+
 	return Model{
-		state:      appState,
-		activePane: PaneNamespace,
-		namespaces: namespace.NewModel(appState),
-		pods:       pods.NewModel(appState),
-		details:    details.NewModel(appState),
-		showHelp:   false,
+		state:        appState,
+		activePane:   PaneNamespace,
+		namespaces:   namespace.NewModel(appState),
+		pods:         pods.NewModel(appState),
+		details:      details.NewModel(appState),
+		showHelp:     false,
+		helpViewport: &helpVp,
 	}
 }
 
@@ -121,6 +128,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.layoutMode = m.determineLayoutMode()
 		m.updatePaneSizes()
+		m.updateActivePanes()
+
+		// Update help viewport dimensions
+		if m.helpViewport != nil {
+			helpHeight := m.height - 6 // border + padding + margins
+			helpWidth := m.width - 10  // border + padding
+			if helpHeight < 10 {
+				helpHeight = 10
+			}
+			if helpWidth < 30 {
+				helpWidth = 30
+			}
+			m.helpViewport.Width = helpWidth
+			m.helpViewport.Height = helpHeight
+		}
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -131,19 +153,66 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			// Toggle help
 			m.showHelp = !m.showHelp
+			if m.showHelp && m.helpViewport != nil {
+				// Reset help viewport scroll position when opening
+				m.helpViewport.GotoTop()
+			}
 			return m, nil
 
 		case "tab":
 			// Switch to next pane (UI_DESIGN.md: Tab switches panes)
-			m.activePane = (m.activePane + 1) % 3
-			m.updateActivePanes()
+			// But don't switch panes if help is shown
+			if !m.showHelp {
+				m.activePane = (m.activePane + 1) % 3
+				m.updateActivePanes()
+			}
 			return m, nil
 
 		case "shift+tab":
 			// Switch to previous pane
-			m.activePane = (m.activePane - 1 + 3) % 3
-			m.updateActivePanes()
+			// But don't switch panes if help is shown
+			if !m.showHelp {
+				m.activePane = (m.activePane - 1 + 3) % 3
+				m.updateActivePanes()
+			}
 			return m, nil
+
+		// Help viewport scrolling (when help is open)
+		case "up", "k":
+			if m.showHelp && m.helpViewport != nil {
+				m.helpViewport.LineUp(1)
+				return m, nil
+			}
+
+		case "down", "j":
+			if m.showHelp && m.helpViewport != nil {
+				m.helpViewport.LineDown(1)
+				return m, nil
+			}
+
+		case "pageup":
+			if m.showHelp && m.helpViewport != nil {
+				m.helpViewport.PageUp()
+				return m, nil
+			}
+
+		case "pagedown":
+			if m.showHelp && m.helpViewport != nil {
+				m.helpViewport.PageDown()
+				return m, nil
+			}
+
+		case "home":
+			if m.showHelp && m.helpViewport != nil {
+				m.helpViewport.GotoTop()
+				return m, nil
+			}
+
+		case "end":
+			if m.showHelp && m.helpViewport != nil {
+				m.helpViewport.GotoBottom()
+				return m, nil
+			}
 		}
 
 		// Forward key events to active pane
@@ -253,7 +322,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state.Pods.Data = msg.Pods
 			m.state.Pods.Loaded = true
 			m.state.LastPodNamespace = msg.Namespace // Cache key
-			m.state.PodsError = "" // DEPRECATED
+			m.state.PodsError = ""                   // DEPRECATED
 			if debugMode {
 				fmt.Fprintf(os.Stderr, "[DEBUG] State updated: state.Pods now has %d pods\n", len(msg.Pods))
 			}
@@ -309,7 +378,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.state.Logs.Loaded = true
 			m.state.LastLogKey = msg.Pod + ":" + msg.Container // Cache key
-			m.state.LogsError = "" // DEPRECATED
+			m.state.LogsError = ""                             // DEPRECATED
 
 			// DEPRECATED: Maintain backward compatibility
 			m.state.CurrentLogs = msg.Content
@@ -339,7 +408,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the entire TUI with responsive layout
 func (m Model) View() string {
 	if m.showHelp {
-		return m.renderHelp()
+		// Render help with border and padding
+		helpContent := m.renderHelp()
+
+		// Apply pane styling to help
+		style := lipgloss.NewStyle().
+			Width(m.width-2).   // Subtract border width
+			Height(m.height-2). // Account for border height
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(theme.ColorBorderActive).
+			Padding(1, 2) // Vertical 1, horizontal 2
+
+		return style.Render(helpContent)
 	}
 
 	if m.width == 0 || m.height == 0 {
@@ -453,100 +533,90 @@ func (m Model) renderStatusBar() string {
 	var right string
 	if m.width < constants.StatusBarWidthMinimalHints {
 		// Narrow: minimal hints
-		right = " Tab | ? | q "
+		right = "Tab | ? | q"
 	} else {
 		// Normal: full hints
-		right = " Tab switch | ? help | q quit "
+		right = "Tab switch | ? help | q quit"
 	}
 
-	// Calculate spacing
+	// Calculate spacing with proper padding
 	leftLen := lipgloss.Width(left)
 	rightLen := lipgloss.Width(right)
-	padding := m.width - leftLen - rightLen
-	if padding < 0 {
-		padding = 0
+	totalNeeded := leftLen + rightLen + 4 // 2 spaces padding each side
+	padding := m.width - totalNeeded
+	if padding < 1 {
+		padding = 1
 	}
 
-	statusLine := left + strings.Repeat(" ", padding) + right
+	statusLine := " " + left + strings.Repeat(" ", padding) + right + " "
 
 	return theme.HelpStyle.Render(statusLine)
 }
 
 // renderHelp shows the help screen with all keybindings.
-// Help text is pre-formatted with explicit line widths to prevent wrapping.
+// Uses scrollable viewport for long content with visual hierarchy and proper spacing.
 func (m Model) renderHelp() string {
-	// Help content as individual lines - no wrapping, no centering issues
-	// Each line is explicitly controlled to prevent `/` artifacts
-	helpLines := []string{
-		"kubectl-medic - Help",
-		"",
-		"GLOBAL KEYBINDINGS:",
-		"  q          Quit application",
-		"  ?          Toggle help",
-		"  Tab        Switch to next pane",
-		"  Shift+Tab  Switch to previous pane",
-		"",
-		"NAMESPACE PANE:",
-		"  Up/Down    Navigate list",
-		"  Enter      Select namespace and load pods",
-		"  /          Filter namespaces",
-		"  s          Cycle sort mode",
-		"  h          Show namespace health summary",
-		"",
-		"PODS PANE:",
-		"  Up/Down    Navigate list",
-		"  Enter or d Show pod details",
-		"  x          Run diagnostics on selected pod",
-		"  l          View logs for selected pod",
-		"  s          Cycle sort mode",
-		"  /          Filter pods",
-		"",
-		"DETAILS PANE:",
-		"  Up/Down    Scroll content",
-		"  c          Switch container (in logs view)",
-		"  d          Return to details view",
-		"  x          View diagnostics",
-		"  l          View logs",
-		"",
-		"Press ? to close this help screen",
-	}
-
-	// Calculate content area: total width minus border (2) minus padding (8 = 4*2)
-	// Using PaneHorizontalOverhead would be incorrect here since we have custom padding
 	contentWidth := m.width - 10 // border(2) + padding(4+4)
 	if contentWidth < 40 {
 		contentWidth = 40
 	}
 
-	// Build help content - truncate any line that exceeds content width
+	// Build help content with visual hierarchy
 	var b strings.Builder
-	for i, line := range helpLines {
-		// Truncate line if too long (shouldn't happen with our short lines)
-		if len(line) > contentWidth {
-			line = line[:contentWidth-3] + "..."
-		}
-		b.WriteString(line)
-		// Don't add newline after last line
-		if i < len(helpLines)-1 {
-			b.WriteString("\n")
-		}
+
+	// Title - centered, prominent
+	title := "kubectl-medic - Help"
+	titleLine := lipgloss.NewStyle().Width(contentWidth).Align(lipgloss.Center).Render(title)
+	b.WriteString(theme.TitleStyle.Render(titleLine) + "\n\n")
+
+	// Global keybindings section
+	b.WriteString(theme.SectionHeaderStyle.Render("Global Keybindings") + "\n")
+	b.WriteString("  q                 Quit application\n")
+	b.WriteString("  ?                 Toggle this help screen\n")
+	b.WriteString("  Tab, Shift+Tab    Switch between panes\n\n")
+
+	// Namespace pane section
+	b.WriteString(theme.SectionHeaderStyle.Render("Namespace Pane") + "\n")
+	b.WriteString("  Up, Down, k, j    Navigate namespaces\n")
+	b.WriteString("  Enter             Select namespace and load pods\n")
+	b.WriteString("  /                 Filter namespaces (type to filter)\n")
+	b.WriteString("  s                 Cycle sort mode\n")
+	b.WriteString("  h                 Show namespace health summary\n\n")
+
+	// Pods pane section
+	b.WriteString(theme.SectionHeaderStyle.Render("Pods Pane") + "\n")
+	b.WriteString("  Up, Down, k, j    Navigate pods\n")
+	b.WriteString("  Enter or d        Show pod details\n")
+	b.WriteString("  x                 Run diagnostics on selected pod\n")
+	b.WriteString("  l                 View logs for selected pod\n")
+	b.WriteString("  s                 Cycle sort mode\n")
+	b.WriteString("  /                 Filter pods (type to filter)\n\n")
+
+	// Details pane section
+	b.WriteString(theme.SectionHeaderStyle.Render("Details Pane") + "\n")
+	b.WriteString("  Up, Down, k, j    Scroll content\n")
+	b.WriteString("  c                 Switch container (in logs view)\n")
+	b.WriteString("  d                 Return to pod details\n")
+	b.WriteString("  x                 View diagnostics\n")
+	b.WriteString("  l                 View logs\n\n")
+
+	// Help navigation section
+	b.WriteString(theme.SectionHeaderStyle.Render("Help Navigation") + "\n")
+	b.WriteString("  Up, Down, k, j    Scroll this help\n")
+	b.WriteString("  Page Up, Page Down Page scroll\n")
+	b.WriteString("  Home, End         Jump to top or bottom\n")
+	b.WriteString("  ?                 Close this help screen\n")
+
+	helpContent := b.String()
+
+	// Set viewport content
+	if m.helpViewport != nil {
+		m.helpViewport.SetContent(helpContent)
+		return m.helpViewport.View()
 	}
 
-	// Calculate available height for content
-	contentHeight := m.height - 6 // border(2) + padding(2+2)
-	if contentHeight < 10 {
-		contentHeight = 10
-	}
-
-	// Simple style: no centering (which can cause artifacts), just border and padding
-	style := lipgloss.NewStyle().
-		Width(m.width - 2).                          // Subtract border width
-		Height(contentHeight).                       // Explicit height
-		BorderStyle(lipgloss.RoundedBorder()).       // Rounded border
-		BorderForeground(theme.ColorBorderActive).   // Cyan border
-		Padding(2, 4)                                // Vertical 2, horizontal 4
-
-	return style.Render(b.String())
+	// Fallback if viewport not initialized
+	return helpContent
 }
 
 // determineLayoutMode determines which layout mode to use based on terminal width

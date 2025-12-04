@@ -13,15 +13,15 @@ var (
 	ColorInfo  = lipgloss.Color("#00FFFF") // Cyan for informational
 
 	// UI element colors
-	ColorBorder        = lipgloss.Color("#555555") // Softer gray for borders
-	ColorBorderActive  = lipgloss.Color("#00AAAA") // Softer cyan for active pane
-	ColorTitle         = lipgloss.Color("#FFFFFF") // White for titles
-	ColorSubtle        = lipgloss.Color("#888888") // Gray for subtle text
-	ColorHighlight     = lipgloss.Color("#FFAA00") // Softer yellow for highlights
-	ColorSelected      = lipgloss.Color("#00CCCC") // Softer cyan for selected items
-	ColorLoading       = lipgloss.Color("#888888") // Gray for loading states
-	ColorEmpty         = lipgloss.Color("#666666") // Darker gray for empty states
-	ColorSeparator     = lipgloss.Color("#444444") // Dark gray for separators
+	ColorBorder       = lipgloss.Color("#555555") // Softer gray for borders
+	ColorBorderActive = lipgloss.Color("#00AAAA") // Softer cyan for active pane
+	ColorTitle        = lipgloss.Color("#FFFFFF") // White for titles
+	ColorSubtle       = lipgloss.Color("#888888") // Gray for subtle text
+	ColorHighlight    = lipgloss.Color("#FFAA00") // Softer yellow for highlights
+	ColorSelected     = lipgloss.Color("#00CCCC") // Softer cyan for selected items
+	ColorLoading      = lipgloss.Color("#888888") // Gray for loading states
+	ColorEmpty        = lipgloss.Color("#666666") // Darker gray for empty states
+	ColorSeparator    = lipgloss.Color("#444444") // Dark gray for separators
 
 	// Base styles
 	BaseStyle = lipgloss.NewStyle().
@@ -79,15 +79,36 @@ var (
 				Foreground(ColorSelected).
 				Bold(true)
 
-	// Help text style
+	// Help text style - used for secondary information
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorSubtle).
 			Italic(true)
 
-	// Key binding hint style
+	// Key binding hint style - for action keys
 	KeyStyle = lipgloss.NewStyle().
 			Foreground(ColorHighlight).
 			Bold(true)
+
+	// Section header style - for subsection titles (Pod, Containers, etc)
+	// Visual hierarchy: TitleStyle > SectionHeaderStyle > content
+	SectionHeaderStyle = lipgloss.NewStyle().
+				Foreground(ColorInfo).
+				Bold(true).
+				Margin(1, 0) // Vertical spacing before header
+
+	// Content padding style - wraps content blocks with consistent left/right padding
+	// Used for details, logs, diagnostics to ensure proper spacing from borders
+	ContentPaddingStyle = lipgloss.NewStyle().
+				Padding(0, 1) // 1 space left and right
+
+	// Legend/command reference style - for help text in boxes
+	LegendStyle = lipgloss.NewStyle().
+			Foreground(ColorSubtle).
+			Margin(1, 0) // Vertical spacing
+
+	// Legend item style - for individual keybindings
+	LegendItemStyle = lipgloss.NewStyle().
+			Margin(0, 0) // Compact vertical spacing
 
 	// Loading and empty state styles
 	LoadingStyle = lipgloss.NewStyle().
