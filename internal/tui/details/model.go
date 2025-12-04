@@ -174,29 +174,30 @@ func (m Model) renderDetails() string {
 	b.WriteString(theme.SectionHeaderStyle.Render("Containers") + "\n")
 	b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", 36)) + "\n")
 	for _, container := range pod.Spec.Containers {
-		b.WriteString(fmt.Sprintf("  • %s\n", theme.KeyStyle.Render(container.Name)))
-		b.WriteString(fmt.Sprintf("    Image: %s\n", container.Image))
+		b.WriteString(fmt.Sprintf("  Container:  %s\n", theme.KeyStyle.Render(container.Name)))
+		b.WriteString(fmt.Sprintf("  Image:      %s\n", container.Image))
 
 		// Find container status
 		for _, status := range pod.Status.ContainerStatuses {
 			if status.Name == container.Name {
-				b.WriteString(fmt.Sprintf("    Ready: %v\n", status.Ready))
-				b.WriteString(fmt.Sprintf("    Restart Count: %d\n", status.RestartCount))
+				b.WriteString(fmt.Sprintf("  Ready:       %v\n", status.Ready))
+				b.WriteString(fmt.Sprintf("  Restarts:    %d\n", status.RestartCount))
 
 				// Container state
 				if status.State.Running != nil {
-					b.WriteString(fmt.Sprintf("    State: %s\n", theme.StatusOKStyle.Render("Running")))
+					b.WriteString(fmt.Sprintf("  State:       %s\n", theme.StatusOKStyle.Render("Running")))
 				} else if status.State.Waiting != nil {
-					b.WriteString(fmt.Sprintf("    State: %s (%s)\n",
+					b.WriteString(fmt.Sprintf("  State:       %s (%s)\n",
 						theme.StatusWarnStyle.Render("Waiting"),
 						status.State.Waiting.Reason))
 				} else if status.State.Terminated != nil {
-					b.WriteString(fmt.Sprintf("    State: %s (exit %d)\n",
+					b.WriteString(fmt.Sprintf("  State:       %s (exit %d)\n",
 						theme.StatusErrorStyle.Render("Terminated"),
 						status.State.Terminated.ExitCode))
 				}
 			}
 		}
+		b.WriteString("\n") // Add blank line between containers
 	}
 
 	// Conditions section
