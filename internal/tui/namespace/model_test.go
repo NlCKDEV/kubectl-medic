@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/NlCKDEV/kubectl-medic/internal/state"
+	"github.com/NlCKDEV/kubectl-medic/internal/types"
 )
 
 // TestFiltering tests that namespace filtering works correctly
@@ -331,4 +333,150 @@ func stripANSI(s string) string {
 		result += string(s[i])
 	}
 	return result
+}
+
+// TestNamespaceEnterLoadsPods verifies that pressing Enter sets SelectedNamespace
+func TestNamespaceEnterLoadsPods(t *testing.T) {
+	appState := &state.AppState{
+		Namespaces: state.Resource[[]state.NamespaceInfo]{
+			Data: []state.NamespaceInfo{
+				{Name: "default", Status: "Active", Age: "100d"},
+				{Name: "kube-system", Status: "Active", Age: "100d"},
+				{Name: "production", Status: "Active", Age: "50d"},
+			},
+		},
+		SelectedNamespace: "",
+	}
+
+	m := NewModel(appState)
+	m.active = true
+	m.cursor = 1 // Select "kube-system"
+
+	// Simulate Enter key
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	m, _ = m.Update(msg)
+
+	if m.state.SelectedNamespace != "kube-system" {
+		t.Errorf("Expected SelectedNamespace to be 'kube-system', got '%s'", m.state.SelectedNamespace)
+	}
+
+	// Verify pods were cleared
+	if len(m.state.Pods.Data) != 0 {
+		t.Error("Expected Pods.Data to be cleared after namespace selection")
+	}
+}
+
+// TestNamespaceHealthKey verifies that pressing 'h' triggers health view
+func TestNamespaceHealthKey(t *testing.T) {
+	appState := &state.AppState{
+		Namespaces: state.Resource[[]state.NamespaceInfo]{
+			Data: []state.NamespaceInfo{
+				{Name: "default", Status: "Active", Age: "100d"},
+				{Name: "production", Status: "Active", Age: "50d"},
+			},
+		},
+		CurrentView:       state.ViewDetails,
+		SelectedNamespace: "",
+		Health: state.Resource[*types.NamespaceHealth]{
+			Loading: false,
+			Loaded:  false,
+			Data:    nil,
+		},
+	}
+
+	m := NewModel(appState)
+	m.active = true
+	m.cursor = 1 // Select "production"
+
+	// Simulate 'h' key
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}}
+	m, _ = m.Update(msg)
+
+	if m.state.CurrentView != state.ViewNamespaceHealth {
+		t.Errorf("Expected CurrentView to be ViewNamespaceHealth, got %v", m.state.CurrentView)
+	}
+
+	if m.state.SelectedNamespace != "production" {
+		t.Errorf("Expected SelectedNamespace to be 'production', got '%s'", m.state.SelectedNamespace)
+	}
+
+	// Verify loading flag was set (since Health.Data is nil)
+	if !m.state.Health.Loading {
+		t.Error("Expected Health.Loading to be true when triggering health view with no cached data")
+	}
+}
+
+// TestNamespaceHealthKeyCaching verifies that cached health data doesn't trigger reload
+func TestNamespaceHealthKeyCaching(t *testing.T) {
+	appState := &state.AppState{
+		Namespaces: state.Resource[[]state.NamespaceInfo]{
+			Data: []state.NamespaceInfo{
+				{Name: "default", Status: "Active", Age: "100d"},
+			},
+		},
+		CurrentView:       state.ViewDetails,
+		SelectedNamespace: "",
+		Health: state.Resource[*types.NamespaceHealth]{
+			Loading: false,
+			Loaded:  true,
+			Data: &types.NamespaceHealth{
+				Namespace: "default", // Health already cached for "default"
+			},
+		},
+	}
+
+	m := NewModel(appState)
+	m.active = true
+	m.cursor = 0 // Select "default"
+
+	// Simulate 'h' key
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}}
+	m, _ = m.Update(msg)
+
+	// Should switch view but NOT trigger loading (cache hit)
+	if m.state.CurrentView != state.ViewNamespaceHealth {
+		t.Errorf("Expected CurrentView to be ViewNamespaceHealth, got %v", m.state.CurrentView)
+	}
+
+	if m.state.Health.Loading {
+		t.Error("Expected Health.Loading to be false when cached health data exists for namespace")
+	}
+}
+
+// TestNamespaceSort verifies that pressing 's' cycles sort modes
+func TestNamespaceSort(t *testing.T) {
+	appState := &state.AppState{
+		Namespaces: state.Resource[[]state.NamespaceInfo]{
+			Data: []state.NamespaceInfo{
+				{Name: "default", Status: "Active", Age: "100d"},
+			},
+		},
+	}
+
+	m := NewModel(appState)
+	m.active = true
+
+	// Initial sort mode should be SortNameAsc
+	if m.sortMode != SortNameAsc {
+		t.Errorf("Expected initial sortMode to be SortNameAsc, got %v", m.sortMode)
+	}
+
+	// Press 's' -> should go to SortNameDesc
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}
+	m, _ = m.Update(msg)
+	if m.sortMode != SortNameDesc {
+		t.Errorf("After first 's', expected SortNameDesc, got %v", m.sortMode)
+	}
+
+	// Press 's' again -> should go to SortStatus
+	m, _ = m.Update(msg)
+	if m.sortMode != SortStatus {
+		t.Errorf("After second 's', expected SortStatus, got %v", m.sortMode)
+	}
+
+	// Press 's' again -> should cycle back to SortNameAsc
+	m, _ = m.Update(msg)
+	if m.sortMode != SortNameAsc {
+		t.Errorf("After third 's', expected SortNameAsc (cycle), got %v", m.sortMode)
+	}
 }
