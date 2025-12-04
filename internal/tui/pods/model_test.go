@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/NlCKDEV/kubectl-medic/internal/state"
 )
 
@@ -409,4 +410,145 @@ func stripANSI(s string) string {
 		result += string(s[i])
 	}
 	return result
+}
+
+// TestPodsEnterShowsDetails verifies that pressing Enter switches to ViewDetails
+func TestPodsEnterShowsDetails(t *testing.T) {
+	appState := &state.AppState{
+		SelectedNamespace: "default",
+		CurrentView:       state.ViewDetails,
+		Pods: state.Resource[[]state.PodInfo]{
+			Data: []state.PodInfo{
+				{Name: "nginx-pod", Namespace: "default", Status: "Running", Restarts: 0, Age: "5d"},
+				{Name: "redis-pod", Namespace: "default", Status: "Running", Restarts: 0, Age: "3d"},
+			},
+		},
+	}
+
+	m := Model{
+		state:  appState,
+		active: true,
+		cursor: 1, // Select "redis-pod"
+	}
+
+	// Simulate Enter key
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	m, _ = m.Update(msg)
+
+	if m.state.CurrentView != state.ViewDetails {
+		t.Errorf("Expected CurrentView to be ViewDetails, got %v", m.state.CurrentView)
+	}
+
+	if m.state.SelectedPod != "redis-pod" {
+		t.Errorf("Expected SelectedPod to be 'redis-pod', got '%s'", m.state.SelectedPod)
+	}
+}
+
+// TestPodsDiagnosticsKey verifies that pressing 'x' switches to ViewDiagnostics
+func TestPodsDiagnosticsKey(t *testing.T) {
+	appState := &state.AppState{
+		SelectedNamespace: "default",
+		CurrentView:       state.ViewDetails,
+		Pods: state.Resource[[]state.PodInfo]{
+			Data: []state.PodInfo{
+				{Name: "nginx-pod", Namespace: "default", Status: "Running", Restarts: 0, Age: "5d"},
+			},
+		},
+	}
+
+	m := Model{
+		state:  appState,
+		active: true,
+		cursor: 0, // Select "nginx-pod"
+	}
+
+	// Simulate 'x' key
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}
+	m, _ = m.Update(msg)
+
+	if m.state.CurrentView != state.ViewDiagnostics {
+		t.Errorf("Expected CurrentView to be ViewDiagnostics, got %v", m.state.CurrentView)
+	}
+
+	if m.state.SelectedPod != "nginx-pod" {
+		t.Errorf("Expected SelectedPod to be 'nginx-pod', got '%s'", m.state.SelectedPod)
+	}
+}
+
+// TestPodsLogsKey verifies that pressing 'l' switches to ViewLogs
+func TestPodsLogsKey(t *testing.T) {
+	appState := &state.AppState{
+		SelectedNamespace: "default",
+		CurrentView:       state.ViewDetails,
+		Pods: state.Resource[[]state.PodInfo]{
+			Data: []state.PodInfo{
+				{Name: "nginx-pod", Namespace: "default", Status: "Running", Restarts: 0, Age: "5d"},
+			},
+		},
+	}
+
+	m := Model{
+		state:  appState,
+		active: true,
+		cursor: 0, // Select "nginx-pod"
+	}
+
+	// Simulate 'l' key
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}
+	m, _ = m.Update(msg)
+
+	if m.state.CurrentView != state.ViewLogs {
+		t.Errorf("Expected CurrentView to be ViewLogs, got %v", m.state.CurrentView)
+	}
+
+	if m.state.SelectedPod != "nginx-pod" {
+		t.Errorf("Expected SelectedPod to be 'nginx-pod', got '%s'", m.state.SelectedPod)
+	}
+}
+
+// TestPodsSort verifies that pressing 's' cycles sort modes
+func TestPodsSort(t *testing.T) {
+	appState := &state.AppState{
+		SelectedNamespace: "default",
+		Pods: state.Resource[[]state.PodInfo]{
+			Data: []state.PodInfo{
+				{Name: "test-pod", Namespace: "default", Status: "Running", Restarts: 0, Age: "5d"},
+			},
+		},
+	}
+
+	m := Model{
+		state:  appState,
+		active: true,
+	}
+
+	// Initial sort mode should be SortByName
+	if m.sortMode != SortByName {
+		t.Errorf("Expected initial sortMode to be SortByName, got %v", m.sortMode)
+	}
+
+	// Press 's' -> should go to SortByStatus
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}
+	m, _ = m.Update(msg)
+	if m.sortMode != SortByStatus {
+		t.Errorf("After first 's', expected SortByStatus, got %v", m.sortMode)
+	}
+
+	// Press 's' again -> should go to SortByRestarts
+	m, _ = m.Update(msg)
+	if m.sortMode != SortByRestarts {
+		t.Errorf("After second 's', expected SortByRestarts, got %v", m.sortMode)
+	}
+
+	// Press 's' again -> should go to SortByAge
+	m, _ = m.Update(msg)
+	if m.sortMode != SortByAge {
+		t.Errorf("After third 's', expected SortByAge, got %v", m.sortMode)
+	}
+
+	// Press 's' again -> should cycle back to SortByName
+	m, _ = m.Update(msg)
+	if m.sortMode != SortByName {
+		t.Errorf("After fourth 's', expected SortByName (cycle), got %v", m.sortMode)
+	}
 }
