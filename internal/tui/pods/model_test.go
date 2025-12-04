@@ -1,6 +1,7 @@
 package pods
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -25,23 +26,18 @@ func TestColumnWidthCalculation(t *testing.T) {
 				width: tt.paneWidth,
 			}
 
-			widths := m.calculateColumnWidths()
+			// Use content width (width minus PaneHorizontalOverhead)
+			contentWidth := tt.paneWidth - 6
+			widths := m.calculateColumnWidths(contentWidth)
 
 			// Check that all columns have reasonable widths (> 0)
+			// Note: some columns may be 0 if dropped for narrow panes
 			if widths.name <= 0 {
 				t.Errorf("Name column width must be positive, got %d", widths.name)
 			}
-			if widths.ready <= 0 {
-				t.Errorf("Ready column width must be positive, got %d", widths.ready)
-			}
+			// Ready, restarts, age may be 0 for narrow panes - check status which is always visible
 			if widths.status <= 0 {
 				t.Errorf("Status column width must be positive, got %d", widths.status)
-			}
-			if widths.restarts <= 0 {
-				t.Errorf("Restarts column width must be positive, got %d", widths.restarts)
-			}
-			if widths.age <= 0 {
-				t.Errorf("Age column width must be positive, got %d", widths.age)
 			}
 		})
 	}
@@ -318,7 +314,9 @@ func TestColumnDropping(t *testing.T) {
 				width: tt.width,
 			}
 
-			widths := m.calculateColumnWidths()
+			// Use content width (width minus PaneHorizontalOverhead)
+			contentWidth := tt.width - 6
+			widths := m.calculateColumnWidths(contentWidth)
 
 			if widths.showAge != tt.expectAge {
 				t.Errorf("Width %d: expected showAge=%v, got %v", tt.width, tt.expectAge, widths.showAge)
@@ -550,5 +548,152 @@ func TestPodsSort(t *testing.T) {
 	m, _ = m.Update(msg)
 	if m.sortMode != SortByName {
 		t.Errorf("After fourth 's', expected SortByName (cycle), got %v", m.sortMode)
+	}
+}
+
+// TestPodsSelectionGutterWidthInvariant verifies that selection gutter is always 2 chars
+func TestPodsSelectionGutterWidthInvariant(t *testing.T) {
+	appState := &state.AppState{
+		SelectedNamespace: "default",
+		Pods: state.Resource[[]state.PodInfo]{
+			Data: []state.PodInfo{
+				{Name: "test-pod", Namespace: "default", Status: "Running", Ready: "1/1", Restarts: 5, Age: "5d"},
+			},
+		},
+	}
+
+	m := Model{
+		state:  appState,
+		width:  80,
+		height: 30,
+		active: true,
+	}
+
+	contentWidth := m.width - 6 // PaneHorizontalOverhead
+	colWidths := m.calculateColumnWidths(contentWidth)
+
+	// Build unselected and selected rows - use same gutter (spaces) to isolate selection style test
+	unselectedRow := m.buildTableRow("  ", "test-pod", colWidths.name, "1/1", colWidths.ready, "Running", colWidths.status, "5", colWidths.restarts, "5d", colWidths.age, colWidths, false, "Running", 5)
+	selectedRow := m.buildTableRow("  ", "test-pod", colWidths.name, "1/1", colWidths.ready, "Running", colWidths.status, "5", colWidths.restarts, "5d", colWidths.age, colWidths, true, "Running", 5)
+
+	unselectedPlain := stripANSI(unselectedRow)
+	selectedPlain := stripANSI(selectedRow)
+
+	// Use rune count for UTF-8 safe comparison
+	unselectedRunes := []rune(unselectedPlain)
+	selectedRunes := []rune(selectedPlain)
+
+	// Both should have the same length (selection style adds no width)
+	if len(unselectedRunes) != len(selectedRunes) {
+		t.Errorf("Selected row rune count (%d) differs from unselected (%d)", len(selectedRunes), len(unselectedRunes))
+		t.Logf("Unselected: %q", unselectedPlain)
+		t.Logf("Selected:   %q", selectedPlain)
+	}
+}
+
+// TestPodsRowWidthConsistency verifies header and data rows have consistent widths
+func TestPodsRowWidthConsistency(t *testing.T) {
+	appState := &state.AppState{
+		SelectedNamespace: "default",
+		Pods: state.Resource[[]state.PodInfo]{
+			Data: []state.PodInfo{
+				{Name: "test-pod", Namespace: "default", Status: "Running", Ready: "1/1", Restarts: 0, Age: "5d"},
+			},
+		},
+	}
+
+	m := Model{
+		state:  appState,
+		width:  100,
+		height: 30,
+		active: true,
+	}
+
+	contentWidth := m.width - 6
+	colWidths := m.calculateColumnWidths(contentWidth)
+
+	// Build header row - use same gutter for both
+	headerRow := m.buildTableRow("  ", "NAME", colWidths.name, "READY", colWidths.ready, "STATUS", colWidths.status, "RST", colWidths.restarts, "AGE", colWidths.age, colWidths, false, "", 0)
+
+	// Build data row - use same gutter
+	dataRow := m.buildTableRow("  ", "test-pod-name", colWidths.name, "1/1", colWidths.ready, "Running", colWidths.status, "0", colWidths.restarts, "5d", colWidths.age, colWidths, false, "Running", 0)
+
+	headerPlain := stripANSI(headerRow)
+	dataPlain := stripANSI(dataRow)
+
+	// Use rune count for UTF-8 safe comparison
+	headerRunes := []rune(headerPlain)
+	dataRunes := []rune(dataPlain)
+
+	if len(headerRunes) != len(dataRunes) {
+		t.Errorf("Header rune count (%d) differs from data row (%d)", len(headerRunes), len(dataRunes))
+		t.Logf("Header: %q", headerPlain)
+		t.Logf("Data:   %q", dataPlain)
+	}
+}
+
+// TestPodsNoNewlinesInRows verifies table rows never contain embedded newlines
+func TestPodsNoNewlinesInRows(t *testing.T) {
+	m := Model{
+		width:  80,
+		height: 30,
+	}
+
+	contentWidth := m.width - 6
+	colWidths := m.calculateColumnWidths(contentWidth)
+
+	// Build a row with potentially long content
+	row := m.buildTableRow("▶ ", "very-long-pod-name-that-might-wrap-in-other-implementations", colWidths.name, "1/10", colWidths.ready, "CrashLoopBackOff", colWidths.status, "999", colWidths.restarts, "100d", colWidths.age, colWidths, true, "CrashLoopBackOff", 999)
+
+	if strings.Contains(row, "\n") {
+		t.Errorf("Row contains newline: %q", row)
+	}
+	if strings.Contains(row, "\r") {
+		t.Errorf("Row contains carriage return: %q", row)
+	}
+}
+
+// TestPodsHeaderNeverWraps verifies table headers fit on one line at all widths
+func TestPodsHeaderNeverWraps(t *testing.T) {
+	appState := &state.AppState{
+		SelectedNamespace: "default",
+		Pods: state.Resource[[]state.PodInfo]{
+			Data: []state.PodInfo{
+				{Name: "test-pod", Namespace: "default", Status: "Running", Ready: "1/1", Restarts: 0, Age: "5d"},
+			},
+		},
+	}
+
+	widths := []int{40, 60, 80, 100, 130, 200}
+
+	for _, w := range widths {
+		t.Run(fmt.Sprintf("width_%d", w), func(t *testing.T) {
+			m := Model{
+				state:  appState,
+				width:  w,
+				height: 20,
+				active: true,
+			}
+
+			view := m.View()
+			lines := strings.Split(view, "\n")
+
+			// Find header line (contains "NAME" and "STATUS")
+			for _, line := range lines {
+				plain := stripANSI(line)
+				if strings.Contains(plain, "NAME") && strings.Contains(plain, "STATUS") {
+					// Verify header is exactly one line (no embedded \n)
+					if strings.Contains(line, "\n") {
+						t.Errorf("Header wrapped at width %d: %q", w, line)
+					}
+					// Verify header doesn't exceed pane content width + safety margin
+					contentWidth := w - 6 // PaneHorizontalOverhead
+					if len([]rune(plain)) > contentWidth+10 {
+						t.Errorf("Header too wide at width %d: %d chars vs content %d", w, len([]rune(plain)), contentWidth)
+					}
+					break
+				}
+			}
+		})
 	}
 }

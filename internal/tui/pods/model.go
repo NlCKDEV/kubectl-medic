@@ -10,6 +10,7 @@ import (
 
 	"github.com/NlCKDEV/kubectl-medic/internal/state"
 	"github.com/NlCKDEV/kubectl-medic/internal/theme"
+	"github.com/NlCKDEV/kubectl-medic/internal/tui/constants"
 	"github.com/NlCKDEV/kubectl-medic/internal/util"
 )
 
@@ -30,11 +31,8 @@ const (
 	colPrefRestarts = 4
 	colPrefAge      = 5
 
-	// Chrome overhead for window calculation
+	// Chrome overhead for window calculation (title, sort, header, separator, help, padding)
 	chromeLines = 12
-
-	// Spaces between columns
-	columnGaps = 4 // 4 single-space gaps between 5 columns
 )
 
 // Model represents the pod list pane
@@ -216,7 +214,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) View() string {
 	var b strings.Builder
 
-	// Title
+	// Content width = pane width minus border and padding overhead
+	contentWidth := max(m.width-constants.PaneHorizontalOverhead, 20)
+
+	// Title with inline sort indicator (compact layout)
 	nsDisplay := m.state.SelectedNamespace
 	if nsDisplay == "" {
 		nsDisplay = "none"
@@ -225,7 +226,18 @@ func (m Model) View() string {
 		fmt.Fprintf(os.Stderr, "[DEBUG] PodsView: SelectedNS=%s, state.Pods=%d, LoadingPods=%v\n",
 			m.state.SelectedNamespace, len(m.state.Pods.Data), m.state.LoadingPods)
 	}
-	title := theme.TitleStyle.Render(fmt.Sprintf("Pods (%s)", util.Ellipsize(nsDisplay, 25)))
+	sortIndicator := ""
+	switch m.sortMode {
+	case SortByName:
+		sortIndicator = "↑"
+	case SortByStatus:
+		sortIndicator = "st"
+	case SortByRestarts:
+		sortIndicator = "rst"
+	case SortByAge:
+		sortIndicator = "age"
+	}
+	title := theme.TitleStyle.Render(fmt.Sprintf("Pods (%s) [%s]", util.Ellipsize(nsDisplay, 20), sortIndicator))
 	b.WriteString(title + "\n\n")
 
 	// Handle different states explicitly
@@ -244,72 +256,27 @@ func (m Model) View() string {
 		// Normal state: show pods table
 		pods := m.getFilteredAndSortedPods()
 
-		// Show sort mode indicator
-		sortModeText := ""
-		switch m.sortMode {
-		case SortByName:
-			sortModeText = "Sort: Name"
-		case SortByStatus:
-			sortModeText = "Sort: Status"
-		case SortByRestarts:
-			sortModeText = "Sort: Restarts ↓"
-		case SortByAge:
-			sortModeText = "Sort: Age"
-		}
-		b.WriteString(theme.HelpStyle.Render(sortModeText) + "\n\n")
+		// Calculate dynamic column widths using content width
+		colWidths := m.calculateColumnWidths(contentWidth)
 
-		// Calculate dynamic column widths based on available space
-		colWidths := m.calculateColumnWidths()
+		// Build header using unified row builder
+		// Use plain text (no HelpStyle) to avoid italic rendering issues
+		headerRow := m.buildTableRow(
+			"  ", // Gutter placeholder for header
+			"NAME", colWidths.name,
+			"READY", colWidths.ready,
+			"STATUS", colWidths.status,
+			"RST", colWidths.restarts,
+			"AGE", colWidths.age,
+			colWidths,
+			false, // not selected
+			"",    // no raw status for header
+			0,     // no restarts for header
+		)
+		b.WriteString(headerRow + "\n")
 
-		// Column headers - use short labels for compact display
-		headerLabel := func(s string, width int) string {
-			if len(s) > width {
-				s = s[:width]
-			}
-			return util.PadRight(s, width)
-		}
-
-		// Build header with explicit widths - respect column visibility
-		var headerParts []string
-		headerParts = append(headerParts, headerLabel("NAME", colWidths.name))
-
-		if colWidths.ready > 0 {
-			headerParts = append(headerParts, headerLabel("READY", colWidths.ready))
-		}
-
-		headerParts = append(headerParts, headerLabel("STATUS", colWidths.status))
-
-		if colWidths.showRestarts {
-			headerParts = append(headerParts, headerLabel("RST", colWidths.restarts))
-		}
-
-		if colWidths.showAge {
-			headerParts = append(headerParts, headerLabel("AGE", colWidths.age))
-		}
-
-		// BUGFIX: Add 2-char prefix to header to match row alignment
-		header := "  " + strings.Join(headerParts, " ")
-		b.WriteString(theme.HelpStyle.Render(header) + "\n")
-
-		// Separator line - calculate actual width from visible columns plus 2-char prefix
-		sepWidth := colWidths.name + colWidths.status
-		gaps := 1 // NAME and STATUS always visible, so at least 1 gap
-
-		if colWidths.ready > 0 {
-			sepWidth += colWidths.ready
-			gaps++
-		}
-		if colWidths.showRestarts {
-			sepWidth += colWidths.restarts
-			gaps++
-		}
-		if colWidths.showAge {
-			sepWidth += colWidths.age
-			gaps++
-		}
-
-		sepWidth += (gaps - 1) // Add gap spaces
-		sepWidth += 2           // Add prefix width to match header/rows
+		// Separator line - calculate total row width
+		sepWidth := m.calculateRowWidth(colWidths)
 		b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", sepWidth)) + "\n")
 
 		// Pod list or empty message
@@ -329,77 +296,28 @@ func (m Model) View() string {
 			// Windowed rendering: only render visible items
 			for i := start; i < end; i++ {
 				pod := pods[i]
-				// NAME column with cursor
-				cursorPrefix := "  "
+
+				// Selection gutter: "▶ " or "  " (fixed width)
+				gutter := "  "
 				if i == m.cursor {
-					cursorPrefix = "▶ "
+					gutter = "▶ "
 				}
 
-				// Truncate name to fit, accounting for cursor (2 chars)
-				nameWidth := colWidths.name - 2
-				podName := pod.Name
-				if len(podName) > nameWidth {
-					podName = util.Ellipsize(podName, nameWidth)
-				}
-				// Pad the combined cursor+name to full column width
-				nameCol := cursorPrefix + podName
-				nameCol = util.PadRight(nameCol, colWidths.name)
+				// Build row using unified builder
+				row := m.buildTableRow(
+					gutter,
+					pod.Name, colWidths.name,
+					pod.Ready, colWidths.ready,
+					pod.Status, colWidths.status,
+					fmt.Sprintf("%d", pod.Restarts), colWidths.restarts,
+					pod.Age, colWidths.age,
+					colWidths,
+					i == m.cursor,
+					pod.Status,
+					pod.Restarts,
+				)
 
-				// Build row parts respecting column visibility
-				var rowParts []string
-				rowParts = append(rowParts, nameCol)
-
-				// READY column - only if visible
-				if colWidths.ready > 0 {
-					readyText := pod.Ready
-					if len(readyText) > colWidths.ready {
-						readyText = readyText[:colWidths.ready]
-					}
-					readyCol := util.PadRight(readyText, colWidths.ready)
-					rowParts = append(rowParts, readyCol)
-				}
-
-				// STATUS column - always visible, truncate BEFORE styling, pad BEFORE styling
-				statusText := pod.Status
-				if len(statusText) > colWidths.status {
-					statusText = util.Ellipsize(statusText, colWidths.status)
-				}
-				statusText = util.PadRight(statusText, colWidths.status)
-				statusCol := theme.StatusStyle(pod.Status).Render(statusText)
-				rowParts = append(rowParts, statusCol)
-
-				// RESTARTS column - only if visible
-				if colWidths.showRestarts {
-					restartsText := fmt.Sprintf("%d", pod.Restarts)
-					if len(restartsText) > colWidths.restarts {
-						restartsText = restartsText[:colWidths.restarts]
-					}
-					restartsCol := util.PadLeft(restartsText, colWidths.restarts)
-					if pod.Restarts > 5 {
-						restartsCol = theme.StatusWarnStyle.Render(restartsCol)
-					}
-					rowParts = append(rowParts, restartsCol)
-				}
-
-				// AGE column - only if visible
-				if colWidths.showAge {
-					ageText := pod.Age
-					if len(ageText) > colWidths.age {
-						ageText = ageText[:colWidths.age]
-					}
-					ageCol := util.PadRight(ageText, colWidths.age)
-					rowParts = append(rowParts, ageCol)
-				}
-
-				// Build final row with single spaces - guarantees single line
-				line := strings.Join(rowParts, " ")
-
-				// Apply selection styling to entire row if selected
-				if i == m.cursor {
-					line = theme.ListItemSelectedStyle.Render(line)
-				}
-
-				b.WriteString(line + "\n")
+				b.WriteString(row + "\n")
 			}
 
 			// Show "more below" indicator if there are more items
@@ -409,17 +327,17 @@ func (m Model) View() string {
 		}
 	}
 
-	// Help text - use width-aware formatting
+	// Help text - use content width for formatting
 	b.WriteString("\n")
 	if m.isFiltering {
 		filterPrompt := fmt.Sprintf("Filter: %s_", m.filter)
 		b.WriteString(theme.StatusInfoStyle.Render(filterPrompt) + "\n")
 		// Filtering mode: simpler help
-		help := util.FormatHelpLine(m.width-8, "Enter apply", "Esc cancel")
+		help := util.FormatHelpLine(contentWidth, "Enter apply", "Esc cancel")
 		b.WriteString(theme.HelpStyle.Render(help))
 	} else {
 		// Normal mode: full help with priorities (most important first)
-		help := util.FormatHelpLine(m.width-8,
+		help := util.FormatHelpLine(contentWidth,
 			"↑/↓ move",
 			"Enter details",
 			"x diagnose",
@@ -429,7 +347,7 @@ func (m Model) View() string {
 		b.WriteString(theme.HelpStyle.Render(help))
 	}
 
-	// Apply pane styling
+	// Apply pane styling with correct width
 	content := b.String()
 	style := theme.PaneStyle
 	if m.active {
@@ -437,9 +355,109 @@ func (m Model) View() string {
 	}
 
 	return style.
-		Width(m.width - 4).
-		Height(m.height - 4).
+		Width(m.width-constants.PaneHorizontalOverhead).
+		Height(m.height-constants.PaneVerticalOverhead).
+		Padding(0, 0).
 		Render(content)
+}
+
+// buildTableRow constructs a single table row with consistent column alignment.
+// The gutter is SEPARATE from the name column, ensuring selection never shifts content.
+func (m Model) buildTableRow(gutter string, name string, nameWidth int, ready string, readyWidth int, status string, statusWidth int, restarts string, restartsWidth int, age string, ageWidth int, colWidths columnWidths, isSelected bool, rawStatus string, rawRestarts int) string {
+	var parts []string
+
+	// GUTTER + NAME: Fixed gutter width, then name padded to remaining width
+	// Name width already includes gutter (SelectionGutterWidth)
+	nameText := name
+	actualNameWidth := nameWidth - constants.SelectionGutterWidth
+	if len(nameText) > actualNameWidth {
+		nameText = util.Ellipsize(nameText, actualNameWidth)
+	}
+	nameText = util.PadRight(nameText, actualNameWidth)
+	parts = append(parts, gutter+nameText)
+
+	// READY column - only if visible
+	if readyWidth > 0 {
+		readyText := ready
+		if len(readyText) > readyWidth {
+			readyText = readyText[:readyWidth]
+		}
+		readyText = util.PadRight(readyText, readyWidth)
+		parts = append(parts, readyText)
+	}
+
+	// STATUS column - always visible, pad BEFORE styling
+	statusText := status
+	if len(statusText) > statusWidth {
+		statusText = util.Ellipsize(statusText, statusWidth)
+	}
+	statusText = util.PadRight(statusText, statusWidth)
+	// Apply status color (no padding in style)
+	if rawStatus != "" {
+		statusText = theme.StatusStyle(rawStatus).Render(statusText)
+	}
+	parts = append(parts, statusText)
+
+	// RESTARTS column - only if visible
+	if colWidths.showRestarts && restartsWidth > 0 {
+		restartsText := restarts
+		if len(restartsText) > restartsWidth {
+			restartsText = restartsText[:restartsWidth]
+		}
+		restartsText = util.PadLeft(restartsText, restartsWidth)
+		// Apply warning style for high restart counts
+		if rawRestarts > 5 {
+			restartsText = theme.StatusWarnStyle.Render(restartsText)
+		}
+		parts = append(parts, restartsText)
+	}
+
+	// AGE column - only if visible
+	if colWidths.showAge && ageWidth > 0 {
+		ageText := age
+		if len(ageText) > ageWidth {
+			ageText = ageText[:ageWidth]
+		}
+		ageText = util.PadRight(ageText, ageWidth)
+		parts = append(parts, ageText)
+	}
+
+	// Join with single space separators
+	row := strings.Join(parts, " ")
+
+	// Apply selection styling (color + bold only, NO padding)
+	if isSelected {
+		row = theme.ListItemSelectedStyle.Render(row)
+	}
+
+	return row
+}
+
+// calculateRowWidth returns the total width of a row given column widths
+func (m Model) calculateRowWidth(colWidths columnWidths) int {
+	// Start with gutter + name (name includes gutter in its width)
+	width := colWidths.name
+	gaps := 0
+
+	if colWidths.ready > 0 {
+		width += colWidths.ready
+		gaps++
+	}
+
+	width += colWidths.status
+	gaps++
+
+	if colWidths.showRestarts {
+		width += colWidths.restarts
+		gaps++
+	}
+
+	if colWidths.showAge {
+		width += colWidths.age
+		gaps++
+	}
+
+	return width + gaps
 }
 
 // SetActive sets whether this pane is active
@@ -555,30 +573,28 @@ type columnWidths struct {
 	showAge      bool
 }
 
-// calculateColumnWidths computes dynamic column widths based on available pane width
-// Ensures single-line headers and rows by guaranteeing consistent column sizes
-// Drops lower-priority columns (AGE, RESTARTS) for very narrow panes
-func (m Model) calculateColumnWidths() columnWidths {
-	// Available width for content (excluding borders and padding)
-	availWidth := m.width - 6
-	if availWidth < 20 {
-		availWidth = 20 // Absolute minimum
-	}
+// calculateColumnWidths computes dynamic column widths based on content width.
+// contentWidth should already have PaneHorizontalOverhead subtracted.
+// Ensures single-line headers and rows by guaranteeing consistent column sizes.
+// Drops lower-priority columns (AGE, RESTARTS) for very narrow panes.
+func (m Model) calculateColumnWidths(contentWidth int) columnWidths {
+	// Row structure: [gutter+name] [ready] [status] [restarts] [age]
+	// Gutter is SelectionGutterWidth (2), included in name column
+	gutter := constants.SelectionGutterWidth
 
-	// Try full 5-column layout first (NAME, READY, STATUS, RESTARTS, AGE)
-	minTotal5Col := colMinName + colMinReady + colMinStatus + colMinRestarts + colMinAge + columnGaps
+	// Try full 5-column layout: gutter+name + ready + status + restarts + age + 4 gaps
+	minTotal5Col := gutter + colMinName + colMinReady + colMinStatus + colMinRestarts + colMinAge + 4
 
-	// If we can fit all 5 columns at minimum widths
-	if availWidth >= minTotal5Col {
+	if contentWidth >= minTotal5Col {
 		// Calculate extra space to distribute
-		extra := availWidth - minTotal5Col
+		extra := contentWidth - minTotal5Col
 
 		// Give most extra space to NAME (70%), some to STATUS (30%)
 		nameExtra := (extra * 70) / 100
 		statusExtra := (extra * 30) / 100
 
 		return columnWidths{
-			name:         colMinName + nameExtra,
+			name:         gutter + colMinName + nameExtra,
 			ready:        colPrefReady,
 			status:       colMinStatus + statusExtra,
 			restarts:     colPrefRestarts,
@@ -588,16 +604,16 @@ func (m Model) calculateColumnWidths() columnWidths {
 		}
 	}
 
-	// Try 4-column layout (drop AGE column)
-	minTotal4Col := colMinName + colMinReady + colMinStatus + colMinRestarts + 3 // 3 gaps
+	// Try 4-column layout (drop AGE): gutter+name + ready + status + restarts + 3 gaps
+	minTotal4Col := gutter + colMinName + colMinReady + colMinStatus + colMinRestarts + 3
 
-	if availWidth >= minTotal4Col {
-		extra := availWidth - minTotal4Col
+	if contentWidth >= minTotal4Col {
+		extra := contentWidth - minTotal4Col
 		nameExtra := (extra * 70) / 100
 		statusExtra := (extra * 30) / 100
 
 		return columnWidths{
-			name:         colMinName + nameExtra,
+			name:         gutter + colMinName + nameExtra,
 			ready:        colPrefReady,
 			status:       colMinStatus + statusExtra,
 			restarts:     colPrefRestarts,
@@ -607,16 +623,16 @@ func (m Model) calculateColumnWidths() columnWidths {
 		}
 	}
 
-	// Try 3-column layout (drop AGE and RESTARTS)
-	minTotal3Col := colMinName + colMinReady + colMinStatus + 2 // 2 gaps
+	// Try 3-column layout (drop AGE and RESTARTS): gutter+name + ready + status + 2 gaps
+	minTotal3Col := gutter + colMinName + colMinReady + colMinStatus + 2
 
-	if availWidth >= minTotal3Col {
-		extra := availWidth - minTotal3Col
+	if contentWidth >= minTotal3Col {
+		extra := contentWidth - minTotal3Col
 		nameExtra := (extra * 60) / 100
 		statusExtra := (extra * 40) / 100
 
 		return columnWidths{
-			name:         colMinName + nameExtra,
+			name:         gutter + colMinName + nameExtra,
 			ready:        colPrefReady,
 			status:       colMinStatus + statusExtra,
 			restarts:     0, // Not shown
@@ -627,11 +643,16 @@ func (m Model) calculateColumnWidths() columnWidths {
 	}
 
 	// Ultra-narrow: just NAME, STATUS (drop READY too)
-	// Minimum viable: NAME (10) + STATUS (10) + 1 gap = 21
+	// Row structure: gutter+name + gap(1) + status = contentWidth
+	// Available for name+status: contentWidth - gutter - gap
+	available := contentWidth - gutter - 1
+	nameExtra := (available * 60) / 100
+	statusExtra := (available * 40) / 100
+
 	return columnWidths{
-		name:         max(10, (availWidth*60)/100),
+		name:         gutter + max(8, colMinName+nameExtra),
 		ready:        0, // Not shown
-		status:       max(10, (availWidth*40)/100),
+		status:       max(10, colMinStatus+statusExtra),
 		restarts:     0, // Not shown
 		age:          0, // Not shown
 		showRestarts: false,
@@ -639,21 +660,9 @@ func (m Model) calculateColumnWidths() columnWidths {
 	}
 }
 
-// max returns the larger of two integers
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // calculatePageSize returns the number of items that fit in one page
 func (m Model) calculatePageSize() int {
-	availableHeight := m.height - chromeLines
-	if availableHeight < 1 {
-		availableHeight = 1
-	}
-	return availableHeight
+	return max(m.height-chromeLines, 1)
 }
 
 // adjustWindowForCursor adjusts windowStart to keep cursor visible

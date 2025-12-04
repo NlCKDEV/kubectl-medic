@@ -472,51 +472,81 @@ func (m Model) renderStatusBar() string {
 	return theme.HelpStyle.Render(statusLine)
 }
 
-// renderHelp shows the help screen with all keybindings
+// renderHelp shows the help screen with all keybindings.
+// Help text is pre-formatted with explicit line widths to prevent wrapping.
 func (m Model) renderHelp() string {
-	help := `
-kubectl-medic - Help
+	// Help content as individual lines - no wrapping, no centering issues
+	// Each line is explicitly controlled to prevent `/` artifacts
+	helpLines := []string{
+		"kubectl-medic - Help",
+		"",
+		"GLOBAL KEYBINDINGS:",
+		"  q          Quit application",
+		"  ?          Toggle help",
+		"  Tab        Switch to next pane",
+		"  Shift+Tab  Switch to previous pane",
+		"",
+		"NAMESPACE PANE:",
+		"  Up/Down    Navigate list",
+		"  Enter      Select namespace and load pods",
+		"  /          Filter namespaces",
+		"  s          Cycle sort mode",
+		"  h          Show namespace health summary",
+		"",
+		"PODS PANE:",
+		"  Up/Down    Navigate list",
+		"  Enter or d Show pod details",
+		"  x          Run diagnostics on selected pod",
+		"  l          View logs for selected pod",
+		"  s          Cycle sort mode",
+		"  /          Filter pods",
+		"",
+		"DETAILS PANE:",
+		"  Up/Down    Scroll content",
+		"  c          Switch container (in logs view)",
+		"  d          Return to details view",
+		"  x          View diagnostics",
+		"  l          View logs",
+		"",
+		"Press ? to close this help screen",
+	}
 
-GLOBAL KEYBINDINGS:
-  q          Quit application
-  ?          Toggle help
-  Tab        Switch to next pane
-  Shift+Tab  Switch to previous pane
+	// Calculate content area: total width minus border (2) minus padding (8 = 4*2)
+	// Using PaneHorizontalOverhead would be incorrect here since we have custom padding
+	contentWidth := m.width - 10 // border(2) + padding(4+4)
+	if contentWidth < 40 {
+		contentWidth = 40
+	}
 
-NAMESPACE PANE:
-  ↑/↓ or k/j Navigate list
-  Enter      Select namespace and load pods
-  /          Filter namespaces (type to filter, Enter to apply, Esc to cancel)
-  s          Cycle sort mode (Name A→Z, Name Z→A, Status)
-  h          Show namespace health summary
+	// Build help content - truncate any line that exceeds content width
+	var b strings.Builder
+	for i, line := range helpLines {
+		// Truncate line if too long (shouldn't happen with our short lines)
+		if len(line) > contentWidth {
+			line = line[:contentWidth-3] + "..."
+		}
+		b.WriteString(line)
+		// Don't add newline after last line
+		if i < len(helpLines)-1 {
+			b.WriteString("\n")
+		}
+	}
 
-PODS PANE:
-  ↑/↓ or k/j Navigate list
-  Enter or d Show pod details
-  x          Run diagnostics on selected pod
-  l          View logs for selected pod
-  s          Cycle sort mode (Name, Status, Restarts, Age)
-  /          Filter pods (type to filter, Enter to apply, Esc to cancel)
+	// Calculate available height for content
+	contentHeight := m.height - 6 // border(2) + padding(2+2)
+	if contentHeight < 10 {
+		contentHeight = 10
+	}
 
-DETAILS PANE:
-  ↑/↓ or k/j Scroll content
-  c          Switch container (in logs view)
-  d          Return to details view
-  x          View diagnostics
-  l          View logs
-
-Press ? to close this help screen
-`
-
+	// Simple style: no centering (which can cause artifacts), just border and padding
 	style := lipgloss.NewStyle().
-		Width(m.width).
-		Height(m.height).
-		Align(lipgloss.Center, lipgloss.Center).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(theme.ColorBorderActive).
-		Padding(2, 4)
+		Width(m.width - 2).                          // Subtract border width
+		Height(contentHeight).                       // Explicit height
+		BorderStyle(lipgloss.RoundedBorder()).       // Rounded border
+		BorderForeground(theme.ColorBorderActive).   // Cyan border
+		Padding(2, 4)                                // Vertical 2, horizontal 4
 
-	return style.Render(help)
+	return style.Render(b.String())
 }
 
 // determineLayoutMode determines which layout mode to use based on terminal width
@@ -573,14 +603,6 @@ func (m *Model) updatePaneSizes() {
 		m.pods.SetSize(fullWidth, paneHeight)
 		m.details.SetSize(fullWidth, paneHeight)
 	}
-}
-
-// max returns the larger of two integers
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // updateActivePanes updates which pane is marked as active

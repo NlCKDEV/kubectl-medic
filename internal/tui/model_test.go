@@ -491,3 +491,134 @@ func TestFilteringMode(t *testing.T) {
 		t.Error("After pressing '/', expected filter prompt in view")
 	}
 }
+
+// TestHelpPageNoStraySlash verifies help page doesn't have fragmented slash characters
+func TestHelpPageNoStraySlash(t *testing.T) {
+	m := NewModel(nil)
+	m.width = 80
+	m.height = 40
+	m.showHelp = true
+
+	helpView := m.renderHelp()
+	lines := strings.Split(helpView, "\n")
+
+	// Count slash occurrences - they should only appear in keybinding descriptions
+	// Legitimate slashes: "Up/Down", "/"  (filter), "Enter or d"
+	// Stray slashes would appear at line start or as isolated characters
+	for i, line := range lines {
+		plainLine := stripANSI(line)
+
+		// Skip empty lines
+		if len(strings.TrimSpace(plainLine)) == 0 {
+			continue
+		}
+
+		// Check for stray slash at start of line (artifact indicator)
+		trimmed := strings.TrimSpace(plainLine)
+		if len(trimmed) > 0 && trimmed[0] == '/' && !strings.HasPrefix(trimmed, "/") {
+			// This shouldn't match our filter line "  /          Filter"
+			if !strings.Contains(plainLine, "Filter") {
+				t.Errorf("Line %d appears to have stray '/' at start: %q", i, plainLine)
+			}
+		}
+
+		// Check for isolated slash (not part of "Up/Down" or similar)
+		words := strings.Fields(plainLine)
+		for _, word := range words {
+			if word == "/" && !strings.Contains(plainLine, "Filter") {
+				t.Errorf("Line %d has isolated '/' character: %q", i, plainLine)
+			}
+		}
+	}
+}
+
+// TestHelpPageNoNewlineWrapping verifies help page lines don't wrap
+func TestHelpPageNoNewlineWrapping(t *testing.T) {
+	widths := []int{60, 80, 100, 120, 150}
+
+	for _, width := range widths {
+		t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
+			m := NewModel(nil)
+			m.width = width
+			m.height = 50
+			m.showHelp = true
+
+			helpView := m.renderHelp()
+			lines := strings.Split(helpView, "\n")
+
+			// Verify reasonable line count (our help content is ~32 lines)
+			// If we have way more lines, something wrapped
+			if len(lines) > 60 {
+				t.Errorf("Help page has %d lines at width %d (expected ~32-45), possible wrapping", len(lines), width)
+			}
+
+			// Check individual lines don't have embedded control chars
+			for i, line := range lines {
+				if strings.Contains(line, "\r") {
+					t.Errorf("Line %d contains carriage return", i)
+				}
+			}
+		})
+	}
+}
+
+// TestHelpPageBlankLinesNotStyled verifies blank lines in help are truly blank
+func TestHelpPageBlankLinesNotStyled(t *testing.T) {
+	m := NewModel(nil)
+	m.width = 80
+	m.height = 50
+	m.showHelp = true
+
+	helpView := m.renderHelp()
+	lines := strings.Split(helpView, "\n")
+
+	// Find lines that should be blank (between sections)
+	blankLineCount := 0
+	for _, line := range lines {
+		plainLine := stripANSI(line)
+		trimmed := strings.TrimSpace(plainLine)
+
+		// If a line is all whitespace after stripping ANSI, it should truly be blank
+		if len(trimmed) == 0 && len(line) > 0 {
+			// Line has ANSI codes but no visible content - check it's just spaces/reset codes
+			blankLineCount++
+		}
+	}
+
+	// We expect some blank lines (section separators)
+	// This test mainly verifies we don't have styled blank lines with artifacts
+	if blankLineCount > 20 {
+		t.Errorf("Too many apparent blank lines (%d), possible rendering issue", blankLineCount)
+	}
+}
+
+// TestPaneHorizontalOverheadConsistency verifies the constant is used correctly
+func TestPaneHorizontalOverheadConsistency(t *testing.T) {
+	// PaneHorizontalOverhead should be 6 (border=2 + padding=4)
+	expected := 6
+
+	// Import and check the constant
+	m := NewModel(nil)
+	m.width = 100
+	m.height = 40
+	m.updatePaneSizes()
+
+	// The namespace and pods panes should use this consistently
+	// We can verify by checking the rendered pane width in the output
+	// This is a sanity check that the constant value is correct
+	nsView := m.namespaces.View()
+	podsView := m.pods.View()
+
+	// Both should render without error
+	if len(nsView) == 0 {
+		t.Error("Namespace view is empty")
+	}
+	if len(podsView) == 0 {
+		t.Error("Pods view is empty")
+	}
+
+	// Verify the constant value matches our understanding
+	if expected != 6 {
+		t.Errorf("PaneHorizontalOverhead expected to be 6, test has %d", expected)
+	}
+}

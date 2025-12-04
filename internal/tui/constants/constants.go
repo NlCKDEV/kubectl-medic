@@ -46,7 +46,23 @@ const (
 	StatusBarHeight = 2
 
 	// PaneBorderPadding is the internal padding within a pane (borders + margins)
+	// DEPRECATED: Use PaneHorizontalOverhead for accurate width calculations
 	PaneBorderPadding = 4
+
+	// PaneHorizontalOverhead is the total horizontal space consumed by pane borders and padding.
+	// PaneStyle uses Border(RoundedBorder) = 2 chars + Padding(1, 2) = 4 chars = 6 total.
+	// This MUST be used consistently in:
+	//   - style.Width(m.width - PaneHorizontalOverhead)
+	//   - content width calculations (column sizing, row building)
+	PaneHorizontalOverhead = 6
+
+	// PaneVerticalOverhead is the total vertical space consumed by pane borders and padding.
+	// PaneStyle uses Border = 2 lines + Padding(1, 2) vertical = 2 lines = 4 total.
+	PaneVerticalOverhead = 4
+
+	// SelectionGutterWidth is the fixed width for the selection indicator column.
+	// Either "▶ " (selected) or "  " (unselected) - always 2 characters.
+	SelectionGutterWidth = 2
 )
 
 // Status bar responsive thresholds
@@ -64,5 +80,7 @@ const (
 	DetailsMaxRecentEvents = 5
 
 	// DetailsHelpTextOffset is the horizontal offset for help text rendering
+	// Deprecated: Use PaneHorizontalOverhead instead for consistent width calculations.
+	// This constant is unused and will be removed in a future release.
 	DetailsHelpTextOffset = 8
 )
