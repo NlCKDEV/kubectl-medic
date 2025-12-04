@@ -283,11 +283,11 @@ func (m Model) View() string {
 		filterPrompt := fmt.Sprintf("Filter: %s_", m.filter)
 		b.WriteString(theme.StatusInfoStyle.Render(filterPrompt) + "\n")
 		// Filtering mode: simpler help
-		help := util.FormatHelpLine(contentWidth, "Enter apply", "Esc cancel")
+		help := util.FormatHelpLineCentered(contentWidth, true, "Enter apply", "Esc cancel")
 		b.WriteString(theme.HelpStyle.Render(help))
 	} else {
 		// Normal mode: full help with priorities
-		help := util.FormatHelpLine(contentWidth,
+		help := util.FormatHelpLineCentered(contentWidth, true,
 			"↑/↓ move",
 			"Enter select",
 			"/ filter",

@@ -257,7 +257,7 @@ func (m Model) renderDetails() string {
 	if helpWidth < 40 {
 		helpWidth = 40
 	}
-	help := util.FormatHelpLine(helpWidth,
+	help := util.FormatHelpLineCentered(helpWidth, true,
 		"↑/↓ scroll",
 		"x diagnostics",
 		"l logs")
@@ -365,7 +365,7 @@ func (m Model) renderDiagnostics() string {
 	if helpWidth < 40 {
 		helpWidth = 40
 	}
-	help := util.FormatHelpLine(helpWidth,
+	help := util.FormatHelpLineCentered(helpWidth, true,
 		"↑/↓ scroll",
 		"c copy mode",
 		"d details",
@@ -440,7 +440,7 @@ func (m Model) renderCopyCommands() string {
 	if helpWidth < 40 {
 		helpWidth = 40
 	}
-	help := util.FormatHelpLine(helpWidth,
+	help := util.FormatHelpLineCentered(helpWidth, true,
 		"↑/↓ scroll",
 		"x back",
 		"Triple-click to copy")
@@ -628,7 +628,7 @@ func (m Model) renderLogs() string {
 	if helpWidth < 40 {
 		helpWidth = 40
 	}
-	help := util.FormatHelpLine(helpWidth,
+	help := util.FormatHelpLineCentered(helpWidth, true,
 		"↑/↓ scroll",
 		"c container",
 		"d details",
@@ -731,7 +731,7 @@ func (m Model) renderNamespaceHealth() string {
 	if helpWidth < 40 {
 		helpWidth = 40
 	}
-	help := util.FormatHelpLine(helpWidth,
+	help := util.FormatHelpLineCentered(helpWidth, true,
 		"d details",
 		"Esc back")
 	b.WriteString(theme.HelpStyle.Render(help))

@@ -63,6 +63,14 @@ func TruncateMiddle(s string, max int) string {
 // if the result exceeds maxWidth. Priority items (earlier in list) are kept.
 // Example: FormatHelpLine(60, "↑/↓ move", "Enter select", "/ filter", "s sort")
 func FormatHelpLine(maxWidth int, items ...string) string {
+	return FormatHelpLineCentered(maxWidth, false, items...)
+}
+
+// FormatHelpLineCentered joins help items with " | " and centers the result.
+// If centered is true, pads the line to be centered within maxWidth.
+// If the line exceeds maxWidth, intelligently truncates (priority items at start are kept).
+// Example: FormatHelpLineCentered(60, true, "↑/↓ move", "Enter select", "/ filter")
+func FormatHelpLineCentered(maxWidth int, centered bool, items ...string) string {
 	if maxWidth < 10 {
 		// Too narrow, just show first item truncated
 		if len(items) > 0 {
@@ -74,20 +82,38 @@ func FormatHelpLine(maxWidth int, items ...string) string {
 	// Try full line first
 	full := strings.Join(items, " | ")
 	if len(full) <= maxWidth {
-		return full
+		line := full
+		if centered {
+			// Center the line within maxWidth
+			padding := (maxWidth - len(line)) / 2
+			return strings.Repeat(" ", padding) + line
+		}
+		return line
 	}
 
 	// Progressively drop lower-priority items (from end)
 	for i := len(items) - 1; i > 0; i-- {
 		partial := strings.Join(items[:i], " | ")
 		if len(partial) <= maxWidth {
-			return partial
+			line := partial
+			if centered {
+				// Center the line within maxWidth
+				padding := (maxWidth - len(line)) / 2
+				return strings.Repeat(" ", padding) + line
+			}
+			return line
 		}
 	}
 
 	// If even first item is too long, truncate it
 	if len(items) > 0 {
-		return Ellipsize(items[0], maxWidth)
+		line := Ellipsize(items[0], maxWidth)
+		if centered {
+			// Center the line within maxWidth
+			padding := (maxWidth - len(line)) / 2
+			return strings.Repeat(" ", padding) + line
+		}
+		return line
 	}
 
 	return ""
