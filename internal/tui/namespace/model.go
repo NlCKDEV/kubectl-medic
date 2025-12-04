@@ -135,7 +135,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.state.SelectedNamespace = selectedNS
 				// Don't set LoadingPods here - let main model handle it
 				m.state.PodsError = ""
-				m.state.Pods = []state.PodInfo{} // Clear previous pods
+				m.state.Pods.Data = []state.PodInfo{} // Clear previous pods
 			}
 		case "/":
 			// Enter filter mode
@@ -147,23 +147,25 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.cursor = 0
 			m.windowStart = 0
 		case "h":
-			// Show namespace health summary
+			// Show namespace health summary (with smart caching)
 			namespaces := m.getFilteredAndSortedNamespaces()
 			if m.cursor < len(namespaces) {
 				selectedNS := namespaces[m.cursor].Name
 
-				// Idempotent: only trigger load if not already loading and not for same namespace
-				if !m.state.LoadingNamespaceHealth {
+				// Smart caching: only trigger load if not already loading and cache is stale
+				if !m.state.Health.Loading {
 					// Check if we need to reload (different namespace or no data)
-					needsLoad := m.state.CurrentNamespaceHealth == nil ||
-						m.state.SelectedNamespace != selectedNS
+					// BUGFIX: Check against Health.Data.Namespace, not SelectedNamespace
+					needsLoad := m.state.Health.Data == nil ||
+						m.state.Health.Data.Namespace != selectedNS
 
 					m.state.SelectedNamespace = selectedNS
 					m.state.CurrentView = state.ViewNamespaceHealth
 
 					if needsLoad {
-						m.state.LoadingNamespaceHealth = true
-						m.state.NamespaceHealthError = ""
+						m.state.Health.Loading = true
+						m.state.LoadingNamespaceHealth = true // DEPRECATED
+						m.state.NamespaceHealthError = ""     // DEPRECATED
 					}
 					// If health already loaded for this namespace, just switch view
 				} else {
@@ -217,8 +219,23 @@ func (m Model) View() string {
 			// Calculate column widths
 			nameWidth, showAge := m.calculateNameWidth()
 
-			// Windowed rendering: only render visible items
+			// Build header with 2-char prefix to match row alignment
+			var headerParts []string
+			headerParts = append(headerParts, util.PadRight("NAME", nameWidth))
+			headerParts = append(headerParts, util.PadRight("STATUS", colStatus))
+			if showAge {
+				headerParts = append(headerParts, util.PadRight("AGE", colAge))
+			}
+			header := "  " + strings.Join(headerParts, " ")
+			b.WriteString(theme.HelpStyle.Render(header) + "\n")
+
+			// Show scroll indicators if content extends beyond window
 			start, end := m.calculateVisibleWindow(len(namespaces))
+			if start > 0 {
+				b.WriteString(theme.HelpStyle.Render("  ↑ more above...\n"))
+			}
+
+			// Windowed rendering: only render visible items
 			for i := start; i < end; i++ {
 				ns := namespaces[i]
 
@@ -273,6 +290,11 @@ func (m Model) View() string {
 
 				b.WriteString(line + "\n")
 			}
+
+			// Show "more below" indicator if there are more items
+			if end < len(namespaces) {
+				b.WriteString(theme.HelpStyle.Render("  ↓ more below...\n"))
+			}
 		}
 	}
 
@@ -322,10 +344,10 @@ func (m *Model) SetSize(width, height int) {
 // getFilteredAndSortedNamespaces returns namespaces matching the current filter and sorted by sort mode
 func (m Model) getFilteredAndSortedNamespaces() []state.NamespaceInfo {
 	// Start with all namespaces
-	result := make([]state.NamespaceInfo, 0, len(m.state.Namespaces))
+	result := make([]state.NamespaceInfo, 0, len(m.state.Namespaces.Data))
 
 	// Apply filter
-	for _, ns := range m.state.Namespaces {
+	for _, ns := range m.state.Namespaces.Data {
 		if m.filter == "" || strings.Contains(strings.ToLower(ns.Name), strings.ToLower(m.filter)) {
 			result = append(result, ns)
 		}

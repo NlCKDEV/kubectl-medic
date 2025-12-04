@@ -12,6 +12,7 @@ import (
 	"github.com/NlCKDEV/kubectl-medic/internal/analysis"
 	"github.com/NlCKDEV/kubectl-medic/internal/state"
 	"github.com/NlCKDEV/kubectl-medic/internal/theme"
+	"github.com/NlCKDEV/kubectl-medic/internal/tui/constants"
 	"github.com/NlCKDEV/kubectl-medic/internal/tui/details"
 	"github.com/NlCKDEV/kubectl-medic/internal/tui/namespace"
 	"github.com/NlCKDEV/kubectl-medic/internal/tui/pods"
@@ -151,24 +152,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.namespaces, cmd = m.namespaces.Update(msg)
 			cmds = append(cmds, cmd)
 
-			// Check if namespace was selected and pods need to be loaded
+			// Smart caching: Check if namespace was selected and pods need to be loaded
 			if debugMode {
-				fmt.Fprintf(os.Stderr, "[DEBUG] PaneNamespace: SelectedNS=%s, LoadingPods=%v\n", m.state.SelectedNamespace, m.state.LoadingPods)
+				fmt.Fprintf(os.Stderr, "[DEBUG] PaneNamespace: SelectedNS=%s, LoadingPods=%v, Loaded=%v, CachedNS=%s\n",
+					m.state.SelectedNamespace, m.state.Pods.Loading, m.state.Pods.Loaded, m.state.LastPodNamespace)
 			}
-			if m.state.SelectedNamespace != "" && !m.state.LoadingPods && len(m.state.Pods) == 0 {
+			// Load pods if: namespace selected AND (not already loading) AND (not cached for this namespace OR cache empty)
+			needsPodsLoad := m.state.SelectedNamespace != "" &&
+				!m.state.Pods.Loading &&
+				(!m.state.Pods.Loaded || m.state.LastPodNamespace != m.state.SelectedNamespace)
+
+			if needsPodsLoad {
 				if debugMode {
 					fmt.Fprintf(os.Stderr, "[DEBUG] Triggering loadPods for namespace: %s\n", m.state.SelectedNamespace)
 				}
-				// Trigger pod loading and set flag to prevent retriggering
-				m.state.LoadingPods = true
+				m.state.Pods.Loading = true
+				m.state.LoadingPods = true // DEPRECATED
 				cmd = loadPods(m.state.KubeClient, m.state.SelectedNamespace)
 				cmds = append(cmds, cmd)
 			} else if debugMode {
-				fmt.Fprintf(os.Stderr, "[DEBUG] NOT triggering loadPods (condition failed)\n")
+				fmt.Fprintf(os.Stderr, "[DEBUG] NOT triggering loadPods (using cache)\n")
 			}
 
 			// Check if namespace health was requested
-			if m.state.LoadingNamespaceHealth && m.state.SelectedNamespace != "" {
+			if m.state.Health.Loading && m.state.SelectedNamespace != "" {
 				cmd = loadNamespaceHealth(m.state.KubeClient, m.state.SelectedNamespace)
 				cmds = append(cmds, cmd)
 			}
@@ -177,18 +184,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pods, cmd = m.pods.Update(msg)
 			cmds = append(cmds, cmd)
 
-			// Check if pod was selected for details or logs
+			// Smart caching: Check if pod was selected for details or logs
 			if m.state.SelectedPod != "" {
 				// Check if we need to load pod details (ViewDetails or ViewDiagnostics)
-				needsDetails := (m.state.CurrentView == state.ViewDetails || m.state.CurrentView == state.ViewDiagnostics) && m.state.LoadingPodDetails
-				// Trigger load if LoadingPodDetails is true (handles both new loads and pod switches)
+				needsDetails := (m.state.CurrentView == state.ViewDetails || m.state.CurrentView == state.ViewDiagnostics) &&
+					m.state.PodDetails.Loading
+				// Trigger load if Loading is true (handles both new loads and pod switches)
 				if needsDetails {
 					cmd = loadPodDetails(m.state.KubeClient, m.state.SelectedNamespace, m.state.SelectedPod)
 					cmds = append(cmds, cmd)
 				}
 
 				// Check if we need to load logs
-				needsLogs := m.state.CurrentView == state.ViewLogs && m.state.LoadingLogs
+				needsLogs := m.state.CurrentView == state.ViewLogs && m.state.Logs.Loading
 				if needsLogs {
 					cmd = loadLogs(m.state.KubeClient, m.state.SelectedNamespace, m.state.SelectedPod)
 					cmds = append(cmds, cmd)
@@ -202,19 +210,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle async Kubernetes responses
 	case NamespacesLoadedMsg:
-		m.state.LoadingNamespaces = false
+		m.state.Namespaces.Loading = false
+		m.state.LoadingNamespaces = false // DEPRECATED: backward compat
 		if msg.Err != nil {
-			m.state.NamespacesError = msg.Err.Error()
+			m.state.Namespaces.Error = msg.Err
+			m.state.NamespacesError = msg.Err.Error() // DEPRECATED
 		} else {
-			m.state.Namespaces = msg.Namespaces
-			m.state.NamespacesError = ""
+			m.state.Namespaces.Data = msg.Namespaces
+			m.state.Namespaces.Loaded = true
+			m.state.NamespacesError = "" // DEPRECATED
 		}
 
 	case PodsLoadedMsg:
 		if debugMode {
 			fmt.Fprintf(os.Stderr, "[DEBUG] PodsLoadedMsg: ns=%s, pods=%d, err=%v\n", msg.Namespace, len(msg.Pods), msg.Err)
 		}
-		m.state.LoadingPods = false
+		m.state.Pods.Loading = false
+		m.state.LoadingPods = false // DEPRECATED: backward compat
 
 		// Check if this message is for the currently selected namespace
 		if msg.Namespace != m.state.SelectedNamespace {
@@ -226,7 +238,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if debugMode {
 					fmt.Fprintf(os.Stderr, "[DEBUG] Triggering fresh load for current namespace: %s\n", m.state.SelectedNamespace)
 				}
-				m.state.LoadingPods = true
+				m.state.Pods.Loading = true
+				m.state.LoadingPods = true // DEPRECATED
 				cmd = loadPods(m.state.KubeClient, m.state.SelectedNamespace)
 				cmds = append(cmds, cmd)
 			}
@@ -234,23 +247,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if msg.Err != nil {
-			m.state.PodsError = msg.Err.Error()
+			m.state.Pods.Error = msg.Err
+			m.state.PodsError = msg.Err.Error() // DEPRECATED
 		} else {
-			m.state.Pods = msg.Pods
-			m.state.PodsError = ""
+			m.state.Pods.Data = msg.Pods
+			m.state.Pods.Loaded = true
+			m.state.LastPodNamespace = msg.Namespace // Cache key
+			m.state.PodsError = "" // DEPRECATED
 			if debugMode {
-				fmt.Fprintf(os.Stderr, "[DEBUG] State updated: state.Pods now has %d pods\n", len(m.state.Pods))
+				fmt.Fprintf(os.Stderr, "[DEBUG] State updated: state.Pods now has %d pods\n", len(msg.Pods))
 			}
 		}
 
 	case PodDetailsLoadedMsg:
-		m.state.LoadingPodDetails = false
+		m.state.PodDetails.Loading = false
+		m.state.LoadingPodDetails = false // DEPRECATED: backward compat
 		if msg.Err != nil {
-			m.state.PodDetailsError = msg.Err.Error()
+			m.state.PodDetails.Error = msg.Err
+			m.state.PodDetailsError = msg.Err.Error() // DEPRECATED
 		} else {
+			m.state.PodDetails.Data = state.PodDetailsData{
+				Pod:    msg.Pod,
+				Events: msg.Events,
+			}
+			m.state.PodDetails.Loaded = true
+			if msg.Pod != nil {
+				m.state.LastPodUID = string(msg.Pod.UID) // Cache key
+			}
+			m.state.PodDetailsError = "" // DEPRECATED
+
+			// DEPRECATED: Maintain backward compatibility
 			m.state.CurrentPod = msg.Pod
 			m.state.CurrentEvents = msg.Events
-			m.state.PodDetailsError = ""
 
 			// Run diagnostics engine on the pod
 			engine := analysis.NewEngine()
@@ -259,34 +287,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Events: msg.Events,
 			})
 
-			// Store diagnostics results (convert to []interface{} to avoid import cycle)
-			m.state.Diagnostics = make([]interface{}, len(diagnostics))
-			for i, diag := range diagnostics {
-				m.state.Diagnostics[i] = diag
-			}
+			// Store diagnostics results (now strongly typed via internal/types)
+			m.state.Diagnostics = diagnostics
 		}
 
 	case LogsLoadedMsg:
-		m.state.LoadingLogs = false
+		m.state.Logs.Loading = false
+		m.state.LoadingLogs = false // DEPRECATED: backward compat
 		if msg.Err != nil {
-			m.state.LogsError = msg.Err.Error()
+			m.state.Logs.Error = msg.Err
+			m.state.LogsError = msg.Err.Error() // DEPRECATED
 		} else {
+			containerIdx := 0
+			if len(msg.Containers) > 0 {
+				containerIdx = 0 // Default to first container
+			}
+			m.state.Logs.Data = state.LogsData{
+				Content:        msg.Content,
+				Containers:     msg.Containers,
+				ContainerIndex: containerIdx,
+			}
+			m.state.Logs.Loaded = true
+			m.state.LastLogKey = msg.Pod + ":" + msg.Container // Cache key
+			m.state.LogsError = "" // DEPRECATED
+
+			// DEPRECATED: Maintain backward compatibility
 			m.state.CurrentLogs = msg.Content
 			m.state.CurrentContainers = msg.Containers
-			m.state.LogsError = ""
-			// Default to first container
-			if len(m.state.CurrentContainers) > 0 {
-				m.state.SelectedContainer = 0
-			}
+			m.state.SelectedContainer = containerIdx
 		}
 
 	case NamespaceHealthLoadedMsg:
-		m.state.LoadingNamespaceHealth = false
+		m.state.Health.Loading = false
+		m.state.LoadingNamespaceHealth = false // DEPRECATED: backward compat
 		if msg.Err != nil {
-			m.state.NamespaceHealthError = msg.Err.Error()
+			m.state.Health.Error = msg.Err
+			m.state.NamespaceHealthError = msg.Err.Error() // DEPRECATED
 		} else {
+			m.state.Health.Data = msg.Health
+			m.state.Health.Loaded = true
+			m.state.NamespaceHealthError = "" // DEPRECATED
+
+			// DEPRECATED: Maintain backward compatibility
 			m.state.CurrentNamespaceHealth = msg.Health
-			m.state.NamespaceHealthError = ""
 		}
 	}
 
@@ -386,7 +429,7 @@ func (m Model) renderStatusBar() string {
 
 	// Build left side with tabs
 	var left string
-	if m.width < 60 {
+	if m.width < constants.StatusBarWidthNarrow {
 		// Very narrow: just show active pane
 		var activeName string
 		switch m.activePane {
@@ -408,7 +451,7 @@ func (m Model) renderStatusBar() string {
 
 	// Build right side with hints
 	var right string
-	if m.width < 80 {
+	if m.width < constants.StatusBarWidthMinimalHints {
 		// Narrow: minimal hints
 		right = " Tab | ? | q "
 	} else {
@@ -458,8 +501,9 @@ PODS PANE:
 DETAILS PANE:
   ↑/↓ or k/j Scroll content
   c          Switch container (in logs view)
-  f          Toggle follow mode (in logs view)
-  Esc        Return to details view
+  d          Return to details view
+  x          View diagnostics
+  l          View logs
 
 Press ? to close this help screen
 `
@@ -478,13 +522,9 @@ Press ? to close this help screen
 // determineLayoutMode determines which layout mode to use based on terminal width
 // Conservative thresholds to prevent wrapping and ensure readability
 func (m Model) determineLayoutMode() LayoutMode {
-	// Adjusted thresholds based on actual table widths
-	// Three panes need ~130+ cols to display without wrapping
-	// Two panes need ~85+ cols
-	// Single pane works at any size but best at 60+
-	if m.width >= 130 {
+	if m.width >= constants.LayoutWidthThreePane {
 		return LayoutThreePane
-	} else if m.width >= 85 {
+	} else if m.width >= constants.LayoutWidthTwoPane {
 		return LayoutTwoPane
 	}
 	return LayoutSinglePane
@@ -492,16 +532,16 @@ func (m Model) determineLayoutMode() LayoutMode {
 
 // updatePaneSizes recalculates and sets sizes for all panes based on layout mode
 func (m *Model) updatePaneSizes() {
-	paneHeight := m.height - 2 // Reserve 2 lines for status bar
+	paneHeight := m.height - constants.StatusBarHeight
 
 	switch m.layoutMode {
 	case LayoutThreePane:
-		// Wide terminals: 28% | 36% | 36% (minimum 20 chars per pane)
-		pane1Width := max(20, m.width*28/100)
-		pane2Width := max(20, m.width*36/100)
+		// Wide terminals: use percentage-based layout with minimums
+		pane1Width := max(constants.PaneWidthMinimum, m.width*constants.PanePercentLeft/100)
+		pane2Width := max(constants.PaneWidthMinimum, m.width*constants.PanePercentMiddle/100)
 		pane3Width := m.width - pane1Width - pane2Width
-		if pane3Width < 20 {
-			pane3Width = 20
+		if pane3Width < constants.PaneWidthMinimum {
+			pane3Width = constants.PaneWidthMinimum
 		}
 
 		m.namespaces.SetSize(pane1Width, paneHeight)
@@ -509,8 +549,8 @@ func (m *Model) updatePaneSizes() {
 		m.details.SetSize(pane3Width, paneHeight)
 
 	case LayoutTwoPane:
-		// Medium terminals: two panes at 45% and 55%
-		pane1Width := max(20, m.width*45/100)
+		// Medium terminals: two panes with percentage-based layout
+		pane1Width := max(constants.PaneWidthMinimum, m.width*constants.PanePercentTwoPaneLeft/100)
 		pane2Width := m.width - pane1Width
 
 		// Which two panes to show depends on active pane
@@ -528,7 +568,7 @@ func (m *Model) updatePaneSizes() {
 
 	case LayoutSinglePane:
 		// Small terminals: one pane gets full width
-		fullWidth := max(40, m.width)
+		fullWidth := max(constants.LayoutWidthMinimum, m.width)
 		m.namespaces.SetSize(fullWidth, paneHeight)
 		m.pods.SetSize(fullWidth, paneHeight)
 		m.details.SetSize(fullWidth, paneHeight)

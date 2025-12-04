@@ -10,13 +10,15 @@ import (
 // TestFiltering tests that namespace filtering works correctly
 func TestFiltering(t *testing.T) {
 	appState := &state.AppState{
-		Namespaces: []state.NamespaceInfo{
-			{Name: "kube-system", Status: "Active", Age: "100d"},
-			{Name: "default", Status: "Active", Age: "100d"},
-			{Name: "production-east", Status: "Active", Age: "50d"},
-			{Name: "production-west", Status: "Active", Age: "50d"},
-			{Name: "staging", Status: "Active", Age: "30d"},
-			{Name: "development", Status: "Active", Age: "10d"},
+		Namespaces: state.Resource[[]state.NamespaceInfo]{
+			Data: []state.NamespaceInfo{
+				{Name: "kube-system", Status: "Active", Age: "100d"},
+				{Name: "default", Status: "Active", Age: "100d"},
+				{Name: "production-east", Status: "Active", Age: "50d"},
+				{Name: "production-west", Status: "Active", Age: "50d"},
+				{Name: "staging", Status: "Active", Age: "30d"},
+				{Name: "development", Status: "Active", Age: "10d"},
+			},
 		},
 	}
 
@@ -81,11 +83,13 @@ func TestFiltering(t *testing.T) {
 // TestSorting tests that namespace sorting works correctly
 func TestSorting(t *testing.T) {
 	appState := &state.AppState{
-		Namespaces: []state.NamespaceInfo{
+		Namespaces: state.Resource[[]state.NamespaceInfo]{
+			Data: []state.NamespaceInfo{
 			{Name: "zebra", Status: "Active", Age: "10d"},
 			{Name: "alpha", Status: "Active", Age: "50d"},
 			{Name: "beta", Status: "Terminating", Age: "30d"},
 			{Name: "gamma", Status: "Active", Age: "20d"},
+				},
 		},
 	}
 
@@ -136,11 +140,13 @@ func TestSorting(t *testing.T) {
 // TestFilteringAndSorting tests that filtering and sorting work together correctly
 func TestFilteringAndSorting(t *testing.T) {
 	appState := &state.AppState{
-		Namespaces: []state.NamespaceInfo{
+		Namespaces: state.Resource[[]state.NamespaceInfo]{
+			Data: []state.NamespaceInfo{
 			{Name: "production-east", Status: "Active", Age: "50d"},
 			{Name: "production-west", Status: "Active", Age: "50d"},
 			{Name: "staging-east", Status: "Active", Age: "30d"},
 			{Name: "development", Status: "Active", Age: "10d"},
+				},
 		},
 	}
 
@@ -231,9 +237,11 @@ func TestCalculateVisibleWindow(t *testing.T) {
 // TestSingleLineGuarantee verifies that namespace list rows never contain newlines
 func TestSingleLineGuarantee(t *testing.T) {
 	appState := &state.AppState{
-		Namespaces: []state.NamespaceInfo{
+		Namespaces: state.Resource[[]state.NamespaceInfo]{
+			Data: []state.NamespaceInfo{
 			{Name: "very-long-namespace-name-that-exceeds-normal-width", Status: "Active", Age: "100d"},
 			{Name: "short", Status: "Terminating", Age: "5d"},
+				},
 		},
 	}
 

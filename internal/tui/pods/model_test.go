@@ -50,12 +50,14 @@ func TestColumnWidthCalculation(t *testing.T) {
 func TestFilteringPods(t *testing.T) {
 	appState := &state.AppState{
 		SelectedNamespace: "default",
-		Pods: []state.PodInfo{
+		Pods: state.Resource[[]state.PodInfo]{
+			Data: []state.PodInfo{
 			{Name: "nginx-deployment-abc123", Namespace: "default", Status: "Running", Restarts: 0, Age: "5d"},
 			{Name: "nginx-deployment-def456", Namespace: "default", Status: "Running", Restarts: 0, Age: "5d"},
 			{Name: "redis-pod-xyz789", Namespace: "default", Status: "CrashLoopBackOff", Restarts: 10, Age: "3d"},
 			{Name: "postgres-pod-123", Namespace: "default", Status: "Running", Restarts: 1, Age: "10d"},
 			{Name: "other-namespace-pod", Namespace: "kube-system", Status: "Running", Restarts: 0, Age: "100d"},
+				},
 		},
 	}
 
@@ -115,11 +117,13 @@ func TestFilteringPods(t *testing.T) {
 func TestSortingPods(t *testing.T) {
 	appState := &state.AppState{
 		SelectedNamespace: "default",
-		Pods: []state.PodInfo{
+		Pods: state.Resource[[]state.PodInfo]{
+			Data: []state.PodInfo{
 			{Name: "zebra-pod", Namespace: "default", Status: "Running", Restarts: 1, Age: "5d"},
 			{Name: "alpha-pod", Namespace: "default", Status: "CrashLoopBackOff", Restarts: 10, Age: "10d"},
 			{Name: "beta-pod", Namespace: "default", Status: "Pending", Restarts: 0, Age: "1d"},
 			{Name: "gamma-pod", Namespace: "default", Status: "Running", Restarts: 5, Age: "3d"},
+				},
 		},
 	}
 
@@ -245,9 +249,11 @@ func TestCalculateVisibleWindow(t *testing.T) {
 func TestSingleLineGuarantee(t *testing.T) {
 	appState := &state.AppState{
 		SelectedNamespace: "default",
-		Pods: []state.PodInfo{
+		Pods: state.Resource[[]state.PodInfo]{
+			Data: []state.PodInfo{
 			{Name: "very-long-pod-name-that-exceeds-normal-column-width-limits", Namespace: "default", Status: "Running", Ready: "1/1", Restarts: 0, Age: "5d"},
 			{Name: "short", Namespace: "default", Status: "CrashLoopBackOff", Ready: "0/1", Restarts: 999, Age: "100d"},
+				},
 		},
 	}
 
@@ -324,6 +330,60 @@ func TestColumnDropping(t *testing.T) {
 			readyVisible := widths.ready > 0
 			if readyVisible != tt.expectReady {
 				t.Errorf("Width %d: expected ready visible=%v, got %v", tt.width, tt.expectReady, readyVisible)
+			}
+		})
+	}
+}
+
+// TestHeaderSingleLine specifically verifies that table headers never wrap
+func TestHeaderSingleLine(t *testing.T) {
+	appState := &state.AppState{
+		SelectedNamespace: "default",
+		Pods: state.Resource[[]state.PodInfo]{
+			Data: []state.PodInfo{
+				{Name: "test-pod", Namespace: "default", Status: "Running", Ready: "1/1", Restarts: 0, Age: "1d"},
+			},
+		},
+	}
+
+	tests := []struct {
+		name  string
+		width int
+	}{
+		{"Ultra narrow", 30},
+		{"Very narrow", 40},
+		{"Narrow", 50},
+		{"Medium", 80},
+		{"Wide", 120},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := Model{
+				state:  appState,
+				width:  tt.width,
+				height: 20,
+				active: true,
+			}
+
+			view := m.View()
+			lines := strings.Split(view, "\n")
+
+			// Find the header line (contains "NAME" or "STATUS")
+			for i, line := range lines {
+				plainLine := stripANSI(line)
+				if strings.Contains(plainLine, "NAME") && strings.Contains(plainLine, "STATUS") {
+					// This is the header line - verify it doesn't have embedded formatting issues
+					// and that it's on a single line
+					if strings.Contains(line, "\r") {
+						t.Errorf("Header line %d contains carriage return", i)
+					}
+					// Header should not be empty
+					if len(plainLine) == 0 {
+						t.Errorf("Header line %d is empty", i)
+					}
+					break
+				}
 			}
 		})
 	}

@@ -6,31 +6,23 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NlCKDEV/kubectl-medic/internal/state"
+	"github.com/NlCKDEV/kubectl-medic/internal/types"
 )
 
-// Severity represents the severity level of a diagnostic finding
-type Severity string
+// Type aliases for backward compatibility
+type Severity = types.Severity
+type Diagnostic = types.Diagnostic
 
 const (
-	SeverityInfo    Severity = "info"
-	SeverityWarning Severity = "warning"
-	SeverityError   Severity = "error"
+	SeverityInfo    = types.SeverityInfo
+	SeverityWarning = types.SeverityWarning
+	SeverityError   = types.SeverityError
 )
-
-// Diagnostic represents a single diagnostic finding about a pod
-type Diagnostic struct {
-	ID                string   // Unique identifier (e.g., "crashloop_backoff")
-	Severity          Severity // Severity level
-	Title             string   // Short summary
-	Description       string   // Human-readable explanation
-	SuggestedCommands []string // kubectl commands user can run
-}
 
 // PodContext contains all information needed to analyze a pod
 type PodContext struct {
 	Pod    *corev1.Pod       // Full pod object
-	Events []state.EventInfo // Related events
+	Events []types.EventInfo // Related events
 }
 
 // Engine runs diagnostic checks on pods
@@ -378,7 +370,7 @@ func analyzeStorageIssues(ctx PodContext) []Diagnostic {
 
 	// Check for FailedMount and FailedAttachVolume events
 	// Exclude events related to ConfigMaps and Secrets (those are handled separately)
-	storageEvents := []state.EventInfo{}
+	storageEvents := []types.EventInfo{}
 	rawStorageEvents := filterEventsByReason(ctx.Events, []string{
 		"FailedMount",
 		"FailedAttachVolume",
@@ -676,8 +668,8 @@ func getContainerImage(pod *corev1.Pod, containerName string) string {
 }
 
 // filterEventsByReason filters events by matching any of the given reasons
-func filterEventsByReason(events []state.EventInfo, reasons []string) []state.EventInfo {
-	var filtered []state.EventInfo
+func filterEventsByReason(events []types.EventInfo, reasons []string) []types.EventInfo {
+	var filtered []types.EventInfo
 	for _, event := range events {
 		for _, reason := range reasons {
 			if strings.Contains(event.Reason, reason) || strings.Contains(event.Message, reason) {
@@ -701,8 +693,8 @@ func allInfoSeverity(diags []Diagnostic) bool {
 
 // SummarizeNamespace analyzes all pods in a namespace and produces a health summary
 // This is used for the namespace health view (UC5)
-func SummarizeNamespace(namespace string, pods []*corev1.Pod, eventsByPod map[string][]state.EventInfo) state.NamespaceHealth {
-	health := state.NamespaceHealth{
+func SummarizeNamespace(namespace string, pods []*corev1.Pod, eventsByPod map[string][]types.EventInfo) types.NamespaceHealth {
+	health := types.NamespaceHealth{
 		Namespace: namespace,
 		TotalPods: len(pods),
 	}

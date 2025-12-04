@@ -2,7 +2,18 @@ package state
 
 import (
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/NlCKDEV/kubectl-medic/internal/types"
 )
+
+// Resource represents a cacheable resource with loading state
+// This pattern unifies loading/error handling across all async data
+type Resource[T any] struct {
+	Data    T
+	Loaded  bool    // True after first successful load
+	Loading bool    // True during active fetch
+	Error   error   // Last error, if any
+}
 
 // KubeClient interface allows for testing and decoupling
 // The real implementation is in internal/kube/client.go
@@ -14,6 +25,19 @@ type KubeClient interface {
 	GetPodLogs(namespace, podName, containerName string, tailLines int64) (string, error)
 	GetPodContainers(namespace, podName string) ([]string, error)
 	HealthCheck() error
+}
+
+// PodDetailsData groups pod details and related data
+type PodDetailsData struct {
+	Pod    *corev1.Pod
+	Events []types.EventInfo
+}
+
+// LogsData groups logs and container information
+type LogsData struct {
+	Content        string
+	Containers     []string
+	ContainerIndex int
 }
 
 // AppState holds the shared state across all TUI components
@@ -29,43 +53,41 @@ type AppState struct {
 	// View state
 	CurrentView ViewMode
 
-	// Data cache (populated by kube client)
-	Namespaces []NamespaceInfo
-	Pods       []PodInfo
-
-	// Pod details cache
-	CurrentPod    *corev1.Pod
-	CurrentEvents []EventInfo
-
-	// Logs cache
-	CurrentLogs       string
-	CurrentContainers []string
-	SelectedContainer int // index into CurrentContainers
-
-	// Loading states
-	LoadingNamespaces bool
-	LoadingPods       bool
-	LoadingPodDetails bool
-	LoadingLogs       bool
-
-	// Error states
-	NamespacesError string
-	PodsError       string
-	PodDetailsError string
-	LogsError       string
+	// Cached resources (using Resource[T] pattern)
+	Namespaces Resource[[]NamespaceInfo]
+	Pods       Resource[[]PodInfo]
+	PodDetails Resource[PodDetailsData]
+	Logs       Resource[LogsData]
+	Health     Resource[*types.NamespaceHealth]
 
 	// Diagnostics results (from analysis engine)
-	// Type: []analysis.Diagnostic (stored as []interface{} to avoid import cycle)
-	// Always assigned from analysis.Engine.AnalyzePod(), type-safe at assignment point
-	Diagnostics []interface{}
+	// Now strongly typed using internal/types to avoid import cycle
+	Diagnostics []types.Diagnostic
 
-	// Namespace health summary
-	CurrentNamespaceHealth  *NamespaceHealth
-	LoadingNamespaceHealth  bool
-	NamespaceHealthError    string
+	// Cache keys for smart reloading
+	LastPodNamespace string // Track which namespace pods are cached for
+	LastPodUID       string // Track which pod details are cached for
+	LastLogKey       string // Track which pod/container logs are cached for
 
-	// Legacy diagnostics (deprecated, use Diagnostics instead)
-	LastDiagnostic *DiagnosticResult
+	// DEPRECATED: Legacy fields kept for backward compatibility during migration
+	// TODO: Remove these after migration is complete
+	CurrentPod           *corev1.Pod
+	CurrentEvents        []types.EventInfo
+	CurrentLogs          string
+	CurrentContainers    []string
+	SelectedContainer    int
+	LoadingNamespaces    bool
+	LoadingPods          bool
+	LoadingPodDetails    bool
+	LoadingLogs          bool
+	LoadingNamespaceHealth bool
+	NamespacesError      string
+	PodsError            string
+	PodDetailsError      string
+	LogsError            string
+	CurrentNamespaceHealth *types.NamespaceHealth
+	NamespaceHealthError   string
+	LastDiagnostic         *DiagnosticResult
 }
 
 // ViewMode represents which detail view is currently active
@@ -113,51 +135,42 @@ type DiagnosticIssue struct {
 	Reason      string
 }
 
-// EventInfo holds information about a Kubernetes event
-type EventInfo struct {
-	Type      string // "Normal", "Warning"
-	Reason    string
-	Message   string
-	Count     int32
-	FirstSeen string
-	LastSeen  string
-}
-
-// NamespaceHealth holds health summary information for a namespace
-type NamespaceHealth struct {
-	Namespace         string
-	TotalPods         int
-	FailingPods       int
-	CrashLoopPods     int
-	ImagePullPods     int
-	SchedulingPods    int
-	ProbeIssuePods    int
-	ResourceIssuePods int
-	StorageIssuePods  int
-	ConfigIssuePods   int
-	InitFailurePods   int
-}
+// Type aliases for backward compatibility - these types now live in internal/types
+type EventInfo = types.EventInfo
+type NamespaceHealth = types.NamespaceHealth
 
 // NewAppState creates a new application state with a Kubernetes client
 func NewAppState(kubeClient KubeClient) *AppState {
 	return &AppState{
 		KubeClient:  kubeClient,
 		CurrentView: ViewDetails,
-		Namespaces:  []NamespaceInfo{},
-		Pods:        []PodInfo{},
-		// Start in loading state - namespaces will be loaded on Init
+
+		// Initialize Resource[T] fields
+		Namespaces: Resource[[]NamespaceInfo]{
+			Data:    []NamespaceInfo{},
+			Loading: true, // Start loading on init
+		},
+		Pods: Resource[[]PodInfo]{
+			Data: []PodInfo{},
+		},
+		PodDetails: Resource[PodDetailsData]{},
+		Logs:       Resource[LogsData]{},
+		Health:     Resource[*types.NamespaceHealth]{},
+
+		// DEPRECATED: Maintain backward compatibility
 		LoadingNamespaces: true,
 	}
 }
 
 // GetPodsInNamespace returns pods filtered by namespace
 func (s *AppState) GetPodsInNamespace(namespace string) []PodInfo {
+	pods := s.Pods.Data
 	if namespace == "" {
-		return s.Pods
+		return pods
 	}
 
 	filtered := []PodInfo{}
-	for _, pod := range s.Pods {
+	for _, pod := range pods {
 		if pod.Namespace == namespace {
 			filtered = append(filtered, pod)
 		}
@@ -167,7 +180,7 @@ func (s *AppState) GetPodsInNamespace(namespace string) []PodInfo {
 
 // GetSelectedPodInfo returns the currently selected pod's info
 func (s *AppState) GetSelectedPodInfo() *PodInfo {
-	for _, pod := range s.Pods {
+	for _, pod := range s.Pods.Data {
 		if pod.Name == s.SelectedPod {
 			return &pod
 		}
@@ -177,15 +190,23 @@ func (s *AppState) GetSelectedPodInfo() *PodInfo {
 
 // ClearError clears all error states
 func (s *AppState) ClearError() {
+	s.Namespaces.Error = nil
+	s.Pods.Error = nil
+	s.PodDetails.Error = nil
+	s.Logs.Error = nil
+	s.Health.Error = nil
+
+	// DEPRECATED: Maintain backward compatibility
 	s.NamespacesError = ""
 	s.PodsError = ""
 	s.PodDetailsError = ""
 	s.LogsError = ""
+	s.NamespaceHealthError = ""
 }
 
 // NamespaceExists checks if the given namespace name exists in the namespace list
 func (s *AppState) NamespaceExists(name string) bool {
-	for _, ns := range s.Namespaces {
+	for _, ns := range s.Namespaces.Data {
 		if ns.Name == name {
 			return true
 		}
@@ -195,7 +216,7 @@ func (s *AppState) NamespaceExists(name string) bool {
 
 // PodExists checks if the given pod name exists in the pod list
 func (s *AppState) PodExists(name string) bool {
-	for _, pod := range s.Pods {
+	for _, pod := range s.Pods.Data {
 		if pod.Name == name {
 			return true
 		}

@@ -143,42 +143,59 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			m.adjustWindowForCursor(pods)
 		case "enter", "d":
-			// Select pod and show details
+			// Select pod and show details (with smart caching)
 			pods := m.getFilteredAndSortedPods()
 			if m.cursor < len(pods) {
-				m.state.SelectedPod = pods[m.cursor].Name
+				selectedPod := pods[m.cursor].Name
+				m.state.SelectedPod = selectedPod
 				m.state.CurrentView = state.ViewDetails
-				m.state.LoadingPodDetails = true
-				m.state.PodDetailsError = ""
+
+				// Smart caching: Only load if not already loading and cache is stale
+				needsLoad := !m.state.PodDetails.Loading &&
+					(!m.state.PodDetails.Loaded || m.state.PodDetails.Data.Pod == nil || m.state.PodDetails.Data.Pod.Name != selectedPod)
+
+				if needsLoad {
+					m.state.PodDetails.Loading = true
+					m.state.LoadingPodDetails = true // DEPRECATED
+					m.state.PodDetailsError = ""     // DEPRECATED
+				}
 			}
 		case "x":
-			// Run diagnostics on selected pod
+			// Run diagnostics on selected pod (with smart caching)
 			pods := m.getFilteredAndSortedPods()
 			if m.cursor < len(pods) {
 				selectedPod := pods[m.cursor].Name
 				m.state.SelectedPod = selectedPod
 				m.state.CurrentView = state.ViewDiagnostics
 
-				// Idempotent: only trigger load if not already loading and details not already present
-				if !m.state.LoadingPodDetails {
-					// If we don't have details for this pod yet, or it's a different pod, trigger load
-					if m.state.CurrentPod == nil || m.state.CurrentPod.Name != selectedPod {
-						m.state.LoadingPodDetails = true
-						m.state.PodDetailsError = ""
-					}
-					// If details already loaded for this pod, diagnostics are already computed
-					// Just switching view mode is sufficient
+				// Smart caching: Only load if not already loading and cache is stale
+				needsLoad := !m.state.PodDetails.Loading &&
+					(!m.state.PodDetails.Loaded || m.state.PodDetails.Data.Pod == nil || m.state.PodDetails.Data.Pod.Name != selectedPod)
+
+				if needsLoad {
+					m.state.PodDetails.Loading = true
+					m.state.LoadingPodDetails = true // DEPRECATED
+					m.state.PodDetailsError = ""     // DEPRECATED
 				}
-				// If already loading, just switch view - don't trigger another load
+				// If already loaded for this pod, diagnostics are already computed - just switch view
 			}
 		case "l":
-			// View logs for selected pod
+			// View logs for selected pod (with smart caching)
 			pods := m.getFilteredAndSortedPods()
 			if m.cursor < len(pods) {
-				m.state.SelectedPod = pods[m.cursor].Name
+				selectedPod := pods[m.cursor].Name
+				m.state.SelectedPod = selectedPod
 				m.state.CurrentView = state.ViewLogs
-				m.state.LoadingLogs = true
-				m.state.LogsError = ""
+
+				// Smart caching: Check if logs are cached for this pod/container
+				// For now, always load logs (container selection may have changed)
+				// TODO: Implement per-container caching based on restart count
+				needsLoad := !m.state.Logs.Loading
+				if needsLoad {
+					m.state.Logs.Loading = true
+					m.state.LoadingLogs = true // DEPRECATED
+					m.state.LogsError = ""     // DEPRECATED
+				}
 			}
 		case "s":
 			// Cycle sort mode
@@ -206,7 +223,7 @@ func (m Model) View() string {
 	}
 	if debugMode {
 		fmt.Fprintf(os.Stderr, "[DEBUG] PodsView: SelectedNS=%s, state.Pods=%d, LoadingPods=%v\n",
-			m.state.SelectedNamespace, len(m.state.Pods), m.state.LoadingPods)
+			m.state.SelectedNamespace, len(m.state.Pods.Data), m.state.LoadingPods)
 	}
 	title := theme.TitleStyle.Render(fmt.Sprintf("Pods (%s)", util.Ellipsize(nsDisplay, 25)))
 	b.WriteString(title + "\n\n")
@@ -270,10 +287,11 @@ func (m Model) View() string {
 			headerParts = append(headerParts, headerLabel("AGE", colWidths.age))
 		}
 
-		header := strings.Join(headerParts, " ")
+		// BUGFIX: Add 2-char prefix to header to match row alignment
+		header := "  " + strings.Join(headerParts, " ")
 		b.WriteString(theme.HelpStyle.Render(header) + "\n")
 
-		// Separator line - calculate actual width from visible columns
+		// Separator line - calculate actual width from visible columns plus 2-char prefix
 		sepWidth := colWidths.name + colWidths.status
 		gaps := 1 // NAME and STATUS always visible, so at least 1 gap
 
@@ -291,6 +309,7 @@ func (m Model) View() string {
 		}
 
 		sepWidth += (gaps - 1) // Add gap spaces
+		sepWidth += 2           // Add prefix width to match header/rows
 		b.WriteString(theme.SeparatorStyle.Render(strings.Repeat("─", sepWidth)) + "\n")
 
 		// Pod list or empty message
@@ -301,8 +320,13 @@ func (m Model) View() string {
 				b.WriteString("\n" + theme.EmptyStyle.Render("No pods in this namespace"))
 			}
 		} else {
-			// Windowed rendering: only render visible items
+			// Show scroll indicators if content extends beyond window
 			start, end := m.calculateVisibleWindow(len(pods))
+			if start > 0 {
+				b.WriteString(theme.HelpStyle.Render("  ↑ more above...\n"))
+			}
+
+			// Windowed rendering: only render visible items
 			for i := start; i < end; i++ {
 				pod := pods[i]
 				// NAME column with cursor
@@ -376,6 +400,11 @@ func (m Model) View() string {
 				}
 
 				b.WriteString(line + "\n")
+			}
+
+			// Show "more below" indicator if there are more items
+			if end < len(pods) {
+				b.WriteString(theme.HelpStyle.Render("  ↓ more below...\n"))
 			}
 		}
 	}

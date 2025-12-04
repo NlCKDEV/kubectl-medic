@@ -12,6 +12,7 @@ import (
 	"github.com/NlCKDEV/kubectl-medic/internal/analysis"
 	"github.com/NlCKDEV/kubectl-medic/internal/state"
 	"github.com/NlCKDEV/kubectl-medic/internal/theme"
+	"github.com/NlCKDEV/kubectl-medic/internal/tui/constants"
 	"github.com/NlCKDEV/kubectl-medic/internal/util"
 )
 
@@ -73,9 +74,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.state.CurrentView = state.ViewDiagnostics
 				return m, nil
 			}
-		case "f":
-			// TODO: Toggle follow mode (in logs view)
-			return m, nil
+		// Follow mode disabled for v1.0 - requires complex goroutine management
+		// and risks blocking the TUI. Will be implemented properly in v1.1.
+		// See Phase 13 documentation for details.
 		default:
 			// Let viewport handle scrolling (up/down/k/j/pgup/pgdn)
 			m.viewport, cmd = m.viewport.Update(msg)
@@ -125,8 +126,8 @@ func (m Model) View() string {
 	}
 
 	return style.
-		Width(m.width - 4).
-		Height(m.height - 4).
+		Width(m.width - constants.PaneBorderPadding).
+		Height(m.height - constants.PaneBorderPadding).
 		Render(viewportView)
 }
 
@@ -223,7 +224,7 @@ func (m Model) renderDetails() string {
 		b.WriteString("  No events\n")
 	} else {
 		for i, event := range m.state.CurrentEvents {
-			if i >= 5 { // Show only 5 most recent events
+			if i >= constants.DetailsMaxRecentEvents {
 				break
 			}
 
@@ -241,7 +242,7 @@ func (m Model) renderDetails() string {
 	}
 
 	b.WriteString("\n")
-	help := util.FormatHelpLine(m.width-8,
+	help := util.FormatHelpLine(m.width-constants.DetailsHelpTextOffset,
 		"↑/↓ scroll",
 		"x diagnostics",
 		"l logs")
@@ -285,13 +286,8 @@ func (m Model) renderDiagnostics() string {
 		contentWidth = 40
 	}
 
-	// Render diagnostics from engine
-	for i, diagInterface := range m.state.Diagnostics {
-		// Type assert to analysis.Diagnostic
-		diag, ok := diagInterface.(analysis.Diagnostic)
-		if !ok {
-			continue
-		}
+	// Render diagnostics from engine (now strongly typed)
+	for i, diag := range m.state.Diagnostics {
 
 		// Add separator between diagnostics
 		if i > 0 {
@@ -378,16 +374,11 @@ func (m Model) renderCopyCommands() string {
 		return b.String()
 	}
 
-	b.WriteString(theme.HelpStyle.Render("Commands (triple-click to select):") + "\n\n")
+	b.WriteString(theme.HelpStyle.Render("Commands ready to copy (select and paste):") + "\n\n")
 
-	// Collect all commands from all diagnostics
+	// Collect all commands from all diagnostics (now strongly typed)
 	commandCount := 0
-	for _, diagInterface := range m.state.Diagnostics {
-		// Type assert to analysis.Diagnostic
-		diag, ok := diagInterface.(analysis.Diagnostic)
-		if !ok {
-			continue
-		}
+	for _, diag := range m.state.Diagnostics {
 
 		// Add commands from this diagnostic
 		if len(diag.SuggestedCommands) > 0 {
@@ -400,8 +391,9 @@ func (m Model) renderCopyCommands() string {
 					continue
 				}
 
-				// Render command with minimal formatting - just prefix
-				b.WriteString(fmt.Sprintf("$ %s\n", cmd))
+				// Render command with NO prefix for easy copy-paste
+				// Users can triple-click to select entire line
+				b.WriteString(fmt.Sprintf("%s\n", cmd))
 				commandCount++
 			}
 
@@ -608,8 +600,8 @@ func (m Model) renderLogs() string {
 	help := util.FormatHelpLine(m.width-8,
 		"↑/↓ scroll",
 		"c container",
-		"f follow",
-		"Esc back")
+		"d details",
+		"x diagnose")
 	b.WriteString(theme.HelpStyle.Render(help))
 
 	return b.String()
